@@ -18,7 +18,7 @@ router = APIRouter()
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Use TTL cache to prevent memory leaks (sessions expire after 1 hour)
+# Use TTL cache to ent memory leaks (sessions expire after 1 prevhour)
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 
