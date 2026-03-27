@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
     # Ollama Configuration
-    ollama_model: str = "gpt-oss:20b"
+    ollama_model: str = "cs-agent-v17"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_debug: bool = False
     

@@ -1,7 +1,3 @@
-"""
-Ollama streaming service for handling chat completions.
-Supports conversation history and streaming responses.
-"""
 import json
 import logging
 from typing import Callable, Optional
@@ -16,6 +12,14 @@ logger = logging.getLogger(__name__)
 ENDPOINT = settings.ollama_url.rstrip("/") + "/api/chat"
 CHUNK_SIZE = 80  # Size of text chunks for non-streaming fallback
 
+SYSTEM_PROMPT = (
+    "你是服務中心線上客服助手。"
+    "請全程使用自然、有人味的繁體中文。"
+    "不要提到 ChatGPT、OpenAI、AI、語言模型。"
+    "若被問「你是誰」，請固定回答："
+    "「您好，我是服務中心的線上客服助手，很高興為您服務。」"
+)
+
 
 def _debug(*args) -> None:
     """Log diagnostic messages when DEBUG is enabled."""
@@ -26,10 +30,10 @@ def _debug(*args) -> None:
 def _extract_text_from_part(part: dict) -> Optional[str]:
     """
     Extract meaningful text from Ollama chat API response JSON.
-    
+
     Args:
         part: Dictionary containing model response data
-        
+
     Returns:
         Extracted text string or None if no text found
     """
@@ -39,7 +43,7 @@ def _extract_text_from_part(part: dict) -> Optional[str]:
         content = message.get("content")
         if isinstance(content, str) and content != "":
             return content
-    
+
     # Fallback to other possible fields
     for key in ("response", "response_text", "text", "output", "content"):
         v = part.get(key)
@@ -73,7 +77,7 @@ def request_stream_sync(
     """
     Core synchronous streaming function with conversation memory support.
     Uses Ollama's /api/chat endpoint with native message array support.
-    
+
     Args:
         user_msg: The user's message to send to the model
         model: Model name to use (uses default if None)
@@ -84,11 +88,11 @@ def request_stream_sync(
     m = model or settings.ollama_model
 
     # Build messages array for /api/chat endpoint
-    messages = []
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if conversation_history:
         messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_msg})
-    
+
     payload = {"model": m, "messages": messages, "stream": True}
 
     try:
@@ -183,15 +187,15 @@ def request_stream_sync(
             # For /api/chat, response is in message.content
             message = j.get("message", {})
             text = message.get("content") if isinstance(message, dict) else None
-            
+
             # Fallback to other fields
             if not text:
                 text = (
-                    j.get("response")
-                    or j.get("text")
-                    or j.get("output")
-                    or j.get("content")
-                    or None
+                        j.get("response")
+                        or j.get("text")
+                        or j.get("output")
+                        or j.get("content")
+                        or None
                 )
             if not text:
                 text = json.dumps(j, ensure_ascii=False)
