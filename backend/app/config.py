@@ -3,7 +3,6 @@ Configuration management for CS_Agent backend.
 Uses Pydantic Settings for environment-based configuration.
 """
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -26,9 +25,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     
     class Config:
+        # 自動從 backend/.env 載入設定，未提供時使用上方預設值
         env_file = ".env"
         env_file_encoding = "utf-8"
 
 
 # Global settings instance
+# 於 import 時建立單例設定，其他模組可直接 from app.config import settings 使用
 settings = Settings()

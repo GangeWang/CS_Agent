@@ -8,6 +8,18 @@ import { defaultSchema } from 'hast-util-sanitize'
 import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css' // KaTeX 樣式
 
+/**
+ * App.jsx（前端聊天室核心）
+ *
+ * 設計重點：
+ * 1) 使用 WebSocket 串流接收後端回覆，避免一次性等待整段內容。
+ * 2) 透過 buffer + 定時 flush，降低 React 高頻 setState 造成的重繪成本。
+ * 3) 以雙重防護做 Markdown/HTML 安全處理：
+ *    - DOMPurify：先清理原始輸入內容
+ *    - rehype-sanitize：再限制 Markdown 轉換後的 HTML 節點與屬性
+ * 4) 支援 IME（中文輸入法）組字時 Enter 不誤送出的互動細節。
+ */
+
 // 擴充 sanitize schema，允許 KaTeX 會用到的 class 與 style
 const katexAllowed = {
     ...defaultSchema,
@@ -54,20 +66,29 @@ function MarkdownViewer({ source }) {
 }
 
 export default function App() {
+    // 聊天訊息列表：user / assistant 混合顯示
     const [messages, setMessages] = useState([
         { id: 1, role: 'assistant', text: '歡迎！請輸入你的問題。' }
     ])
+    // 使用者輸入框內容
     const [input, setInput] = useState('')
+    // 是否正在等待/接收後端回覆（控制送出按鈕與 UI 狀態）
     const [isLoading, setIsLoading] = useState(false)
     const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
+    // 聊天面板 DOM 參照，用於自動滾動到底部
     const panelRef = useRef(null)
 
+    // WebSocket 實體參照
     const wsRef = useRef(null)
+    // 當前「尚未完成」的 assistant 訊息 id（串流回填目標）
     const pendingAssistantId = useRef(null)
+    // 斷線重連計數，用於 exponential backoff
     const reconnectAttempts = useRef(0)
+    // 心跳控制：timer + 未收到 pong 的次數
     const heartbeatRef = useRef({ timer: null, missed: 0 })
     const bufferRef = useRef('')           // accumulate small deltas
     const flushTimerRef = useRef(null)
+    // 用時間戳 + 隨機數生成前端訊息 id（避免碰撞）
     const NEXT_ID = () => Date.now() + Math.floor(Math.random() * 1000)
 
     // auto-scroll
@@ -75,10 +96,11 @@ export default function App() {
         if (panelRef.current) panelRef.current.scrollTop = panelRef.current.scrollHeight
     }, [messages])
 
-    // build ws url (local dev)
+    // 根據頁面協議動態選擇 ws / wss，避免 HTTPS 頁面混用不安全 ws
     const wsUrl = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
 
     const connectWs = useCallback((url = wsUrl) => {
+        // 如果已連線或正在連線，就不重複建立，避免多條 socket 造成狀態錯亂
         const existing = wsRef.current
         if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return
 
@@ -87,6 +109,7 @@ export default function App() {
             wsRef.current = ws
 
             ws.onopen = () => {
+                // 連線成功後重置重連次數並啟動心跳機制
                 reconnectAttempts.current = 0
                 startHeartbeat()
             }
@@ -95,9 +118,11 @@ export default function App() {
                 try {
                     const payload = JSON.parse(evt.data)
                     if (payload && payload.type === 'pong') {
+                        // 收到心跳回覆，將 missed 歸零
                         heartbeatRef.current.missed = 0
                         return
                     }
+                    // 其餘訊息交由統一 handler（delta/done/error 等）處理
                     handleWsPayload(payload)
                 } catch (err) {
                     console.error('[ws] parse error', err, evt.data)
@@ -120,6 +145,7 @@ export default function App() {
     }, [wsUrl])
 
     function waitForWsOpen(ws, timeout = 3000) {
+        // 把 WebSocket 事件轉為 Promise，讓 sendMessage 可 await 連線完成
         return new Promise((resolve, reject) => {
             if (!ws) return reject(new Error('No WebSocket'))
             if (ws.readyState === WebSocket.OPEN) return resolve()
@@ -140,6 +166,7 @@ export default function App() {
     }
 
     function startHeartbeat() {
+        // 先清理舊 timer，再重建，避免重複 setInterval
         stopHeartbeat()
         heartbeatRef.current.missed = 0
         heartbeatRef.current.timer = setInterval(() => {
@@ -148,6 +175,7 @@ export default function App() {
             try {
                 ws.send(JSON.stringify({ type: 'ping' }))
                 heartbeatRef.current.missed += 1
+                // 連續多次沒有 pong 視為死連線，主動 close 觸發重連流程
                 if (heartbeatRef.current.missed > 2) {
                     ws.close()
                 }
@@ -168,6 +196,7 @@ export default function App() {
     function scheduleReconnect(url = wsUrl) {
         reconnectAttempts.current = Math.min(10, reconnectAttempts.current + 1)
         const attempt = reconnectAttempts.current
+        // 指數退避，避免重連風暴；最大延遲 30 秒
         const delay = Math.min(30000, 200 * 2 ** attempt)
         setTimeout(() => connectWs(url), delay)
     }
@@ -179,11 +208,13 @@ export default function App() {
         bufferRef.current = ''
         const aid = pendingAssistantId.current
         if (!aid) {
+            // 若不存在 pending assistant，建立新的 assistant 泡泡承接文字
             const newId = NEXT_ID()
             pendingAssistantId.current = newId
             setMessages(prev => [...prev, { id: newId, role: 'assistant', text }])
             return
         }
+        // 仍在同一則 assistant 回覆中時，採 append 方式增量更新文字
         setMessages(prev => prev.map(m => m.id === aid ? { ...m, text: m.text + text } : m))
     }
 
@@ -205,6 +236,7 @@ export default function App() {
     // unify incoming payload to a text delta
     function extractDeltaText(payload) {
         if (!payload || typeof payload !== 'object') return ''
+        // 兼容多種後端欄位命名，提升前後端版本差異時的韌性
         const candidates = [
             payload.text,
             payload.response,
@@ -216,6 +248,7 @@ export default function App() {
             if (typeof v === 'string' && v.length > 0) return v
         }
         if (typeof payload.thinking === 'string' && payload.thinking.trim() !== '') {
+            // 思考內容若非最終輸出，不顯示在主訊息泡泡
             return ''
         }
         return ''
@@ -224,6 +257,7 @@ export default function App() {
     function handleWsPayload(payload) {
         if (!payload || typeof payload !== 'object') return
         if (payload.type === 'delta') {
+            // 串流片段先進 buffer，再由 flush timer 批次更新 UI
             const delta = payload.text || ''
             bufferRef.current += delta
             ensureFlushTimer()
@@ -255,8 +289,10 @@ export default function App() {
             const errText = payload.error || '伺服器錯誤'
             const aid = pendingAssistantId.current
             if (aid) {
+                // 如果有正在生成的 assistant 訊息，直接覆寫成錯誤訊息
                 setMessages(prev => prev.map(m => m.id === aid ? { ...m, text: errText } : m))
             } else {
+                // 否則新增一則 assistant 錯誤訊息，讓使用者看到失敗原因
                 setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: errText }])
             }
             pendingAssistantId.current = null
@@ -272,6 +308,7 @@ export default function App() {
         const trimmed = input.trim()
         if (!trimmed) return
         if (pendingAssistantId.current) {
+            // 防止併發送出導致回覆交錯：上一則未完成時拒絕新請求
             setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: '請等待前一則回覆完畢' }])
             return
         }
@@ -287,6 +324,7 @@ export default function App() {
 
         try {
             if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                // 若 socket 尚未就緒，先建連線並等待 open
                 connectWs(wsUrl)
                 await waitForWsOpen(wsRef.current, 5000)
             }
@@ -305,6 +343,7 @@ export default function App() {
                 model: 'gpt-oss:20b',
                 messages: [{ role: 'user', content: trimmed }]
             }
+            // 請求格式與後端約定一致：model + messages[]
             ws.send(JSON.stringify(payload))
         } catch (err) {
             // Send error already handled by UI state
@@ -326,6 +365,7 @@ export default function App() {
                 // WebSocket cleanup error - can be safely ignored during unmount
                 console.debug('WebSocket cleanup error:', e);
             }
+            // 確保離開頁面時停止背景 timer，避免記憶體洩漏
             stopHeartbeat()
             clearFlushTimer()
         }

@@ -9,9 +9,12 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 # Constants
+# Ollama Chat API 端點，使用 rstrip 避免 base URL 結尾 / 導致重複斜線
 ENDPOINT = settings.ollama_url.rstrip("/") + "/api/chat"
+# 非串流 fallback 時，將完整文字切成固定片段回傳給前端，維持前端一致處理流程
 CHUNK_SIZE = 80  # Size of text chunks for non-streaming fallback
 
+# 系統提示詞：統一客服人設與回覆語氣
 SYSTEM_PROMPT = (
     "你是服務中心線上客服助手。"
     "請全程使用自然、有人味的繁體中文。"
@@ -88,6 +91,7 @@ def request_stream_sync(
     m = model or settings.ollama_model
 
     # Build messages array for /api/chat endpoint
+    # 先放 system，再接歷史，再放本輪 user，符合常見 chat completion 上下文順序
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if conversation_history:
         messages.extend(conversation_history)
@@ -120,6 +124,7 @@ def request_stream_sync(
                 if not raw:
                     continue
 
+                # httpx 不同版本可能回 bytes 或 str，這裡統一轉成 str
                 line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
                 line = line.strip()
                 _debug("RAW LINE:", line)
@@ -133,6 +138,7 @@ def request_stream_sync(
                     continue
 
                 if data == "[DONE]":
+                    # 兼容 OpenAI 風格結束標記
                     on_chunk({"type": "done"})
                     return
 
@@ -148,6 +154,7 @@ def request_stream_sync(
                     text_chunk = _extract_text_from_part(part)
                     if text_chunk:
                         on_chunk({"type": "delta", "text": text_chunk})
+                    # Ollama done=true 時主動補 done，確保前端正確收尾
                     on_chunk({"type": "done"})
                     return
 
@@ -164,6 +171,7 @@ def request_stream_sync(
     except Exception as e:
         logger.warning(f"Stream exception, falling back to non-streaming: {e}")
 
+        # 串流失敗時退回非串流請求，提升穩定性與使用者可用性
         try:
             resp2 = client.post(
                 ENDPOINT,
@@ -207,6 +215,7 @@ def request_stream_sync(
             return
 
         # Send text in chunks
+        # 模擬 delta 回傳，讓前端不需區分 stream / non-stream 兩種渲染邏輯
         for i in range(0, len(text), CHUNK_SIZE):
             on_chunk({"type": "delta", "text": text[i: i + CHUNK_SIZE]})
         on_chunk({"type": "done"})

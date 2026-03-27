@@ -10,6 +10,12 @@ from app.routers.ws import router as ws_router
 
 from app.config import settings
 
+# 後端入口檔（main.py）角色：
+# 1) 初始化 FastAPI 應用
+# 2) 掛載 CORS 中介層，讓前端可跨網域呼叫
+# 3) 提供 /health 健康檢查（含 Ollama 連線檢測）
+# 4) 掛載 WebSocket 路由 /ws/chat
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -42,10 +48,13 @@ async def health():
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{settings.ollama_url}/api/tags")
             if response.status_code == 200:
+                # API 與 Ollama 都可用
                 return {"status": "ok", "ollama": "connected"}
             else:
+                # API 正常，但 Ollama 回傳非 200，標記為 degraded 便於監控告警
                 return {"status": "degraded", "ollama": "error", "details": f"HTTP {response.status_code}"}
     except Exception as e:
+        # 連線失敗時仍回應健康資訊，避免監控端直接超時
         logger.warning(f"Health check - Ollama connection failed: {e}")
         return {"status": "degraded", "ollama": "disconnected", "error": str(e)}
 
