@@ -59,6 +59,7 @@ export default function App() {
     ])
     const [input, setInput] = useState('')
     const [isLoading, setIsLoading] = useState(false)
+    const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
     const panelRef = useRef(null)
 
     const wsRef = useRef(null)
@@ -115,7 +116,7 @@ export default function App() {
             console.error('[ws] connect failed', e)
             scheduleReconnect(url)
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [wsUrl])
 
     function waitForWsOpen(ws, timeout = 3000) {
@@ -319,8 +320,8 @@ export default function App() {
     useEffect(() => {
         connectWs(wsUrl)
         return () => {
-            try { 
-                if (wsRef.current) wsRef.current.close() 
+            try {
+                if (wsRef.current) wsRef.current.close()
             } catch(e) {
                 // WebSocket cleanup error - can be safely ignored during unmount
                 console.debug('WebSocket cleanup error:', e);
@@ -328,7 +329,7 @@ export default function App() {
             stopHeartbeat()
             clearFlushTimer()
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     return (
@@ -375,21 +376,27 @@ export default function App() {
                         if (!isLoading && input.trim()) sendMessage()
                     }}
                 >
-          <textarea
-              className="input"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="請輸入您的問題..."
-              disabled={isLoading}
-              aria-label="輸入訊息"
-              rows={3}
-              onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      if (!isLoading && input.trim()) sendMessage()
-                  }
-              }}
-          />
+                    <textarea
+                        className="input"
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        placeholder="請輸入您的問題..."
+                        disabled={isLoading}
+                        aria-label="輸入訊息"
+                        rows={3}
+                        onCompositionStart={() => setIsComposing(true)}
+                        onCompositionEnd={() => setIsComposing(false)}
+                        onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                // IME 選字中時，不送出
+                                if (isComposing || e.nativeEvent?.isComposing || e.keyCode === 229) {
+                                    return
+                                }
+                                e.preventDefault()
+                                if (!isLoading && input.trim()) sendMessage()
+                            }
+                        }}
+                    />
 
                     <button className="btn-send" type="submit" disabled={isLoading || !input.trim()}>
                         {isLoading ? '傳送中...' : '發送'}
