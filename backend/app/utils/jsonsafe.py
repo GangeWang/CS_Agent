@@ -14,4 +14,5 @@ def json_dumps(obj: dict) -> str:
     Returns:
         JSON string with ensure_ascii=False for proper Unicode handling
     """
+    # ensure_ascii=False：保留中文原文，避免被轉成 \uXXXX 形式
     return json.dumps(obj, ensure_ascii=False)

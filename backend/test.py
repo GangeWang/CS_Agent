@@ -1,6 +1,8 @@
 # test.py
 import httpx, traceback
 
+# 目的：快速驗證 Ollama /api/generate 的串流輸出格式是否正常。
+# 注意：此檔案仰賴本機已有 Ollama 服務在 127.0.0.1:11434，若未啟動會連線失敗。
 url = "http://127.0.0.1:11434/api/generate"
 payload = {"model":"gpt-oss:20b","prompt":"hello","stream":True}
 

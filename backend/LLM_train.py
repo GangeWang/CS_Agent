@@ -1,3 +1,14 @@
+"""
+LLM_train.py
+
+此腳本用於訓練客服語料的 LoRA 微調模型，流程包含：
+1) 載入基礎模型與 tokenizer
+2) 套用 PEFT/LoRA 設定
+3) 讀取並清洗聊天資料（支援 messages / conversations 兩種格式）
+4) 使用 SFTTrainer 進行訓練（含 checkpoint 續訓）
+5) 做一次簡單推理驗證
+6) 輸出 LoRA 權重與 GGUF 模型
+"""
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
@@ -41,6 +52,14 @@ dataset = load_dataset(
 system_prompt = "你是一個專業的繁體中文客服，需要有耐心並使用繁體中文回答客人的問題"
 
 def normalize_to_messages(example):
+    """
+    將單筆樣本正規化為 chat messages 格式：
+    [{"role":"system|user|assistant","content":"..."}]
+
+    支援兩種常見資料結構：
+    - OpenAI/Ollama 風格：example["messages"]
+    - ShareGPT 風格：example["conversations"]（from/value）
+    """
     if "messages" in example and example["messages"] is not None:
         msgs = []
         for m in example["messages"]:
@@ -68,6 +87,12 @@ def normalize_to_messages(example):
     return []
 
 def formatting_func(examples):
+    """
+    Dataset map callback（batched=True）：
+    - 把批次資料逐筆轉成 chat template 文字
+    - 若沒有 system 訊息就補上預設客服 system prompt
+    - 回傳 {"text": [...]} 供 SFTTrainer 使用
+    """
     texts = []
     batch_size = len(next(iter(examples.values()))) if len(examples) > 0 else 0
 
@@ -166,6 +191,7 @@ prompt = tokenizer.apply_chat_template(
 inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
 
 with torch.no_grad():
+    # 僅做 smoke test；推理參數偏保守，避免生成過長
     outputs = model.generate(
         **inputs,
         max_new_tokens=64,
