@@ -10,6 +10,7 @@ from typing import Dict, List
 from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
+from ..services.guardrail import classify_text
 from ..utils.jsonsafe import json_dumps
 from ..config import settings
 
@@ -25,11 +26,21 @@ logger = logging.getLogger(__name__)
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 
+def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
+    """Append one user/assistant pair and trim history length."""
+    history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
+    history.append({"role": "user", "content": user_msg})
+    history.append({"role": "assistant", "content": assistant_msg})
+    if len(history) > settings.history_max_length:
+        history = history[-settings.history_max_length:]
+    conversation_sessions[session_id] = history
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
     """
     WebSocket endpoint for chat streaming with conversation memory.
-    
+
     Features:
     - Streaming responses from Ollama
     - Conversation history management
@@ -43,7 +54,7 @@ async def ws_chat(websocket: WebSocket) -> None:
     # Generate unique session_id for this connection
     session_id = id(websocket)
     conversation_sessions[session_id] = []
-    
+
     logger.info(f"WebSocket connection established: session_id={session_id}")
 
     try:
@@ -87,6 +98,34 @@ async def ws_chat(websocket: WebSocket) -> None:
             user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
+                continue
+
+            # Guardrail classification before calling LLM
+            # - ABUSIVE: prioritize emotional de-escalation
+            # - PROMPT_ATTACK / SPAM: politely refuse the request
+            guardrail_result = classify_text(user_msg)
+            guardrail_label = guardrail_result.get("label", "NORMAL")
+
+            if guardrail_label == "ABUSIVE":
+                soothing_msg = (
+                    "我理解你現在可能有點生氣，我先陪你一起釐清問題。"
+                    "你可以告訴我遇到的狀況與希望我怎麼協助，我會盡力幫你處理。"
+                )
+                await websocket.send_text(json_dumps({"type": "delta", "text": soothing_msg}))
+                await websocket.send_text(json_dumps({"type": "done"}))
+                _append_and_trim_history(session_id, user_msg, soothing_msg)
+                logger.info(f"Guardrail ABUSIVE handled for session {session_id}")
+                continue
+
+            if guardrail_label in {"PROMPT_ATTACK", "SPAM"}:
+                refuse_msg = (
+                    "抱歉，這類請求我無法協助。"
+                    "如果你願意，我可以改為協助你處理一般服務相關問題。"
+                )
+                await websocket.send_text(json_dumps({"type": "delta", "text": refuse_msg}))
+                await websocket.send_text(json_dumps({"type": "done"}))
+                _append_and_trim_history(session_id, user_msg, refuse_msg)
+                logger.info(f"Guardrail {guardrail_label} rejected for session {session_id}")
                 continue
 
             model = payload.get("model")
@@ -134,14 +173,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                         # Update history after conversation completes
                         if chunk.get("type") == "done" and assistant_response:
                             # 僅在正常完成時，把 user/assistant 內容寫入歷史
-                            history.append({"role": "user", "content": user_msg})
-                            history.append({"role": "assistant", "content": "".join(assistant_response)})
+                            _append_and_trim_history(session_id, user_msg, "".join(assistant_response))
 
-                            # Limit history length (keep most recent messages)
-                            if len(history) > settings.history_max_length:
-                                conversation_sessions[session_id] = history[-settings.history_max_length:]
-                            
-                            logger.info(f"Conversation completed for session {session_id}, history size: {len(history)}")
+                            logger.info(
+                                f"Conversation completed for session {session_id}, "
+                                f"history size: {len(conversation_sessions.get(session_id, []))}"
+                            )
                         break
 
             except Exception as e:
