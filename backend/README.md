@@ -11,7 +11,7 @@ FastAPI-based backend service for the CS_Agent intelligent chat bot with streami
 - **Session management**: Automatic TTL-based session cleanup to prevent memory leaks
 - **Health monitoring**: Health check endpoint with Ollama connectivity verification
 - **Logging**: Comprehensive structured logging
-- **Guardrail 分類**: 先做文字分類，辱罵優先安撫，Prompt attack/垃圾內容委婉拒絕
+- **Guardrail 分類**: 先做文字分類，辱罵優先安撫，Prompt attack / 垃圾內容委婉拒絕
 
 ## Requirements
 

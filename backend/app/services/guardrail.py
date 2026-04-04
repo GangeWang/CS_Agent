@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 import json
 import logging
 
@@ -17,9 +17,15 @@ logger = logging.getLogger(__name__)
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 MODEL_DIR = Path(__file__).resolve().parents[2] / "backend_ml_ovr_models"
 CONFIG_PATH = MODEL_DIR / "ovr_config.json"
+ModelMap = Dict[str, Any]
+ThresholdMap = Dict[str, float]
 
 
-def _predict_ovr(models, thresholds, text: str) -> Tuple[str, Dict[str, float], Dict[str, bool]]:
+def _predict_ovr(
+        models: ModelMap,
+        thresholds: ThresholdMap,
+        text: str
+) -> Tuple[str, Dict[str, float], Dict[str, bool]]:
     probs: Dict[str, float] = {}
     pass_flags: Dict[str, bool] = {}
 
@@ -36,7 +42,7 @@ def _predict_ovr(models, thresholds, text: str) -> Tuple[str, Dict[str, float], 
 
 
 @lru_cache(maxsize=1)
-def _load_guardrail_models():
+def _load_guardrail_models() -> Tuple[ModelMap, ThresholdMap]:
     if not CONFIG_PATH.exists():
         raise FileNotFoundError(f"Config not found: {CONFIG_PATH}")
 

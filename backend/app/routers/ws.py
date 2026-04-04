@@ -28,11 +28,12 @@ conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
     """Append one user/assistant pair and trim history length."""
-    history: List[Dict[str, str]] = conversation_sessions[session_id]
+    history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
     history.append({"role": "user", "content": user_msg})
     history.append({"role": "assistant", "content": assistant_msg})
     if len(history) > settings.history_max_length:
-        conversation_sessions[session_id] = history[-settings.history_max_length:]
+        history = history[-settings.history_max_length:]
+    conversation_sessions[session_id] = history
 
 
 @router.websocket("/ws/chat")
