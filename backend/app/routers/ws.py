@@ -10,6 +10,7 @@ from typing import Dict, List
 from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
+from ..services.guardrail import classify_text
 from ..utils.jsonsafe import json_dumps
 from ..config import settings
 
@@ -87,6 +88,42 @@ async def ws_chat(websocket: WebSocket) -> None:
             user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
+                continue
+
+            # Guardrail classification before calling LLM
+            # - ABUSIVE: prioritize emotional de-escalation
+            # - PROMPT_ATTACK / SPAM: politely refuse the request
+            guardrail_result = classify_text(user_msg)
+            guardrail_label = guardrail_result.get("label", "NORMAL")
+
+            if guardrail_label == "ABUSIVE":
+                soothing_msg = (
+                    "我理解你現在可能有點生氣，我先陪你一起釐清問題。"
+                    "你可以告訴我遇到的狀況與希望我怎麼協助，我會盡力幫你處理。"
+                )
+                await websocket.send_text(json_dumps({"type": "delta", "text": soothing_msg}))
+                await websocket.send_text(json_dumps({"type": "done"}))
+                history: List[Dict[str, str]] = conversation_sessions[session_id]
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": soothing_msg})
+                if len(history) > settings.history_max_length:
+                    conversation_sessions[session_id] = history[-settings.history_max_length:]
+                logger.info(f"Guardrail ABUSIVE handled for session {session_id}")
+                continue
+
+            if guardrail_label in {"PROMPT_ATTACK", "SPAM"}:
+                refuse_msg = (
+                    "抱歉，這類請求我無法協助。"
+                    "如果你願意，我可以改為協助你處理一般服務相關問題。"
+                )
+                await websocket.send_text(json_dumps({"type": "delta", "text": refuse_msg}))
+                await websocket.send_text(json_dumps({"type": "done"}))
+                history = conversation_sessions[session_id]
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": refuse_msg})
+                if len(history) > settings.history_max_length:
+                    conversation_sessions[session_id] = history[-settings.history_max_length:]
+                logger.info(f"Guardrail {guardrail_label} rejected for session {session_id}")
                 continue
 
             model = payload.get("model")

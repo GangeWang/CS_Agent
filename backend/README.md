@@ -11,6 +11,7 @@ FastAPI-based backend service for the CS_Agent intelligent chat bot with streami
 - **Session management**: Automatic TTL-based session cleanup to prevent memory leaks
 - **Health monitoring**: Health check endpoint with Ollama connectivity verification
 - **Logging**: Comprehensive structured logging
+- **Guardrail 分類**: 先做文字分類，辱罵優先安撫，Prompt attack/垃圾內容委婉拒絕
 
 ## Requirements
 
@@ -150,3 +151,4 @@ python test.py
 - Ollama streaming responses are handled in thread pools to avoid blocking
 - Session management uses TTL cache to prevent memory leaks
 - All configuration is centralized in `config.py` for easy testing and deployment
+- Guardrail 會載入 `backend/backend_ml_ovr_models/*.joblib` 與 `ovr_config.json`
