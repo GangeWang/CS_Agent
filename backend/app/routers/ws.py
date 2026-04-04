@@ -26,6 +26,15 @@ logger = logging.getLogger(__name__)
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 
+def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
+    """Append one user/assistant pair and trim history length."""
+    history: List[Dict[str, str]] = conversation_sessions[session_id]
+    history.append({"role": "user", "content": user_msg})
+    history.append({"role": "assistant", "content": assistant_msg})
+    if len(history) > settings.history_max_length:
+        conversation_sessions[session_id] = history[-settings.history_max_length:]
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
     """
@@ -103,11 +112,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 )
                 await websocket.send_text(json_dumps({"type": "delta", "text": soothing_msg}))
                 await websocket.send_text(json_dumps({"type": "done"}))
-                history: List[Dict[str, str]] = conversation_sessions[session_id]
-                history.append({"role": "user", "content": user_msg})
-                history.append({"role": "assistant", "content": soothing_msg})
-                if len(history) > settings.history_max_length:
-                    conversation_sessions[session_id] = history[-settings.history_max_length:]
+                _append_and_trim_history(session_id, user_msg, soothing_msg)
                 logger.info(f"Guardrail ABUSIVE handled for session {session_id}")
                 continue
 
@@ -118,11 +123,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 )
                 await websocket.send_text(json_dumps({"type": "delta", "text": refuse_msg}))
                 await websocket.send_text(json_dumps({"type": "done"}))
-                history = conversation_sessions[session_id]
-                history.append({"role": "user", "content": user_msg})
-                history.append({"role": "assistant", "content": refuse_msg})
-                if len(history) > settings.history_max_length:
-                    conversation_sessions[session_id] = history[-settings.history_max_length:]
+                _append_and_trim_history(session_id, user_msg, refuse_msg)
                 logger.info(f"Guardrail {guardrail_label} rejected for session {session_id}")
                 continue
 
@@ -171,13 +172,8 @@ async def ws_chat(websocket: WebSocket) -> None:
                         # Update history after conversation completes
                         if chunk.get("type") == "done" and assistant_response:
                             # 僅在正常完成時，把 user/assistant 內容寫入歷史
-                            history.append({"role": "user", "content": user_msg})
-                            history.append({"role": "assistant", "content": "".join(assistant_response)})
+                            _append_and_trim_history(session_id, user_msg, "".join(assistant_response))
 
-                            # Limit history length (keep most recent messages)
-                            if len(history) > settings.history_max_length:
-                                conversation_sessions[session_id] = history[-settings.history_max_length:]
-                            
                             logger.info(f"Conversation completed for session {session_id}, history size: {len(history)}")
                         break
 
