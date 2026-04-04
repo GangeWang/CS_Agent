@@ -175,7 +175,10 @@ async def ws_chat(websocket: WebSocket) -> None:
                             # 僅在正常完成時，把 user/assistant 內容寫入歷史
                             _append_and_trim_history(session_id, user_msg, "".join(assistant_response))
 
-                            logger.info(f"Conversation completed for session {session_id}, history size: {len(history)}")
+                            logger.info(
+                                f"Conversation completed for session {session_id}, "
+                                f"history size: {len(conversation_sessions.get(session_id, []))}"
+                            )
                         break
 
             except Exception as e:
