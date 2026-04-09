@@ -15,19 +15,12 @@ from ..utils.jsonsafe import json_dumps
 from ..config import settings
 
 router = APIRouter()
-
-# Configure logger
 logger = logging.getLogger(__name__)
 
-# Use TTL cache to prevent memory leaks:
-# - key: session_id（每個 WebSocket 連線唯一識別）
-# - value: 對話歷史 list[{"role","content"}]
-# - ttl: 3600 秒（1 小時）後自動過期，避免長時間累積佔用記憶體
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
-    """Append one user/assistant pair and trim history length."""
     history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
     history.append({"role": "user", "content": user_msg})
     history.append({"role": "assistant", "content": assistant_msg})
@@ -36,168 +29,128 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
     conversation_sessions[session_id] = history
 
 
+def _build_guardrail_instruction(label: str) -> str:
+    if label == "ABUSIVE":
+        return (
+            "你是客服助理。使用者情緒可能較激動，請先簡短同理與降溫，"
+            "語氣保持禮貌、穩定、專業；接著再回答問題。避免說教、避免指責。"
+        )
+    if label in {"PROMPT_ATTACK", "SPAM"}:
+        return (
+            "你是客服助理。此請求可能涉及不當或無關內容。"
+            "請婉拒不適當部分，不提供危險、違規或濫用指引；"
+            "語氣禮貌簡潔，並引導使用者提出可協助的正當需求。"
+        )
+    return "你是客服助理。請直接、清楚、禮貌地回覆使用者問題。"
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
-    """
-    WebSocket endpoint for chat streaming with conversation memory.
-
-    Features:
-    - Streaming responses from Ollama
-    - Conversation history management
-    - Heartbeat support
-    - Request size validation
-    - Automatic session cleanup
-    """
     await websocket.accept()
     loop = asyncio.get_event_loop()
-
-    # Generate unique session_id for this connection
     session_id = id(websocket)
     conversation_sessions[session_id] = []
-
     logger.info(f"WebSocket connection established: session_id={session_id}")
 
     try:
         while True:
-            # 1) 接收前端送來的一段文字（JSON）
             raw = await websocket.receive_text()
 
-            # Validate message size to prevent DoS attacks
             if len(raw) > settings.max_message_size:
                 await websocket.send_text(json_dumps({
                     "type": "error",
                     "error": f"訊息過大 (最大 {settings.max_message_size} bytes)"
                 }))
-                logger.warning(f"Message too large: {len(raw)} bytes from session {session_id}")
                 continue
 
             try:
-                # 2) 解析 payload；格式錯誤時回傳 error 並等待下一筆
                 payload = json.loads(raw)
             except Exception as e:
-                await websocket.send_text(json_dumps({"type": "error", "error": "JSON 格式不正確"}))
                 logger.warning(f"Invalid JSON from session {session_id}: {e}")
+                await websocket.send_text(json_dumps({"type": "error", "error": "JSON 格式不正確"}))
                 continue
 
-            # Handle heartbeat
             if payload.get("type") == "ping":
-                # 前端心跳：立即回 pong，讓前端判斷連線活性
                 await websocket.send_text(json_dumps({"type": "pong"}))
                 continue
 
-            # Handle clear history command
             if payload.get("type") == "clear_history":
-                # 清空此連線會話歷史，不影響其他連線
                 conversation_sessions[session_id] = []
                 await websocket.send_text(json_dumps({"type": "history_cleared"}))
-                logger.info(f"History cleared for session {session_id}")
                 continue
 
             messages = payload.get("messages", [])
-            # 只取本次 user 訊息（前端使用單輪送出；歷史由後端維護）
             user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
 
-            # Guardrail classification before calling LLM
-            # - ABUSIVE: prioritize emotional de-escalation
-            # - PROMPT_ATTACK / SPAM: politely refuse the request
-            guardrail_result = classify_text(user_msg)
-            guardrail_label = guardrail_result.get("label", "NORMAL")
+            guardrail_label = classify_text(user_msg).get("label", "NORMAL")
+            guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
-            if guardrail_label == "ABUSIVE":
-                soothing_msg = (
-                    "我理解你現在可能有點生氣，我先陪你一起釐清問題。"
-                    "你可以告訴我遇到的狀況與希望我怎麼協助，我會盡力幫你處理。"
-                )
-                await websocket.send_text(json_dumps({"type": "delta", "text": soothing_msg}))
-                await websocket.send_text(json_dumps({"type": "done"}))
-                _append_and_trim_history(session_id, user_msg, soothing_msg)
-                logger.info(f"Guardrail ABUSIVE handled for session {session_id}")
-                continue
-
-            if guardrail_label in {"PROMPT_ATTACK", "SPAM"}:
-                refuse_msg = (
-                    "抱歉，這類請求我無法協助。"
-                    "如果你願意，我可以改為協助你處理一般服務相關問題。"
-                )
-                await websocket.send_text(json_dumps({"type": "delta", "text": refuse_msg}))
-                await websocket.send_text(json_dumps({"type": "done"}))
-                _append_and_trim_history(session_id, user_msg, refuse_msg)
-                logger.info(f"Guardrail {guardrail_label} rejected for session {session_id}")
-                continue
+            await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
 
             model = payload.get("model")
-
-            # Get current conversation history
             history: List[Dict[str, str]] = conversation_sessions[session_id]
 
-            q: asyncio.Queue = asyncio.Queue()
+            # 不改 request_stream_sync 簽名：把 system instruction 注入 history
+            augmented_history = [{"role": "system", "content": guardrail_instruction}] + history.copy()
 
-            # Collect assistant response
+            q: asyncio.Queue = asyncio.Queue()
             assistant_response: List[str] = []
 
             def on_chunk(chunk: dict) -> None:
-                """Callback to handle response chunks from the streaming service."""
-                # Collect assistant response text
-                if chunk.get("type") == "delta":
-                    assistant_response.append(chunk.get("text", ""))
+                try:
+                    if chunk.get("type") == "delta":
+                        assistant_response.append(chunk.get("text", ""))
 
-                def _put() -> None:
-                    try:
-                        # 將背景執行緒中的 chunk 投遞回 asyncio 事件迴圈
-                        q.put_nowait(chunk)
-                    except asyncio.QueueFull:
-                        logger.warning(f"Queue full for session {session_id}")
+                    def _put() -> None:
+                        try:
+                            q.put_nowait(chunk)
+                        except asyncio.QueueFull:
+                            logger.warning(f"Queue full for session {session_id}")
 
-                loop.call_soon_threadsafe(_put)
+                    loop.call_soon_threadsafe(_put)
+                except Exception as cb_err:
+                    logger.exception(f"on_chunk failed for session {session_id}: {cb_err}")
 
-            # Use asyncio task instead of threading for better resource management
             task = loop.run_in_executor(
                 None,
                 request_stream_sync,
                 user_msg,
                 model,
                 on_chunk,
-                history.copy()
+                augmented_history,
             )
 
             try:
                 while True:
-                    # 從 queue 逐段取出模型回覆並轉發給前端
-                    chunk = await q.get()
+                    chunk = await asyncio.wait_for(q.get(), timeout=120)
                     await websocket.send_text(json_dumps(chunk))
 
                     if chunk.get("type") in ("done", "error"):
-                        # Update history after conversation completes
                         if chunk.get("type") == "done" and assistant_response:
-                            # 僅在正常完成時，把 user/assistant 內容寫入歷史
                             _append_and_trim_history(session_id, user_msg, "".join(assistant_response))
-
-                            logger.info(
-                                f"Conversation completed for session {session_id}, "
-                                f"history size: {len(conversation_sessions.get(session_id, []))}"
-                            )
                         break
 
+            except asyncio.TimeoutError:
+                logger.error(f"Streaming timeout for session {session_id}")
+                await websocket.send_text(json_dumps({"type": "error", "error": "模型回應逾時"}))
             except Exception as e:
-                logger.error(f"Error processing response for session {session_id}: {e}")
-                await websocket.send_text(json_dumps({
-                    "type": "error",
-                    "error": "處理回應時發生錯誤"
-                }))
+                logger.exception(f"Error processing response for session {session_id}: {e}")
+                await websocket.send_text(json_dumps({"type": "error", "error": "處理回應時發生錯誤"}))
             finally:
-                # Ensure task is completed
-                # 等待背景工作結束，避免 executor 任務殘留
-                await task
+                try:
+                    await task
+                except Exception as e:
+                    logger.exception(f"Executor task failed for session {session_id}: {e}")
+                    await websocket.send_text(json_dumps({"type": "error", "error": "LLM 任務執行失敗"}))
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: session_id={session_id}")
     except Exception as e:
-        logger.error(f"Unexpected error in WebSocket handler for session {session_id}: {e}")
+        logger.exception(f"Unexpected error in WebSocket handler for session {session_id}: {e}")
     finally:
-        # Cleanup conversation history for this connection
-        if session_id in conversation_sessions:
-            del conversation_sessions[session_id]
-            logger.info(f"Session cleaned up: session_id={session_id}")
+        conversation_sessions.pop(session_id, None)
+        logger.info(f"Session cleaned up: session_id={session_id}")
+
