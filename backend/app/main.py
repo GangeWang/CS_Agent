@@ -5,8 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import logging
+import asyncio
 
 from app.routers.ws import router as ws_router
+from app.services.guardrail import classify_text
 
 from app.config import settings
 
@@ -33,6 +35,79 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def _warmup_guardrail_model() -> None:
+    """
+    啟動時預熱 Guardrail 模型資源。
+
+    設計目的：
+    1) 避免第一位使用者送出訊息時，才觸發模型與語意嵌入器載入，造成首包延遲。
+    2) 預熱失敗不應中斷 API 啟動，因此採用「記錄警告 + 持續啟動」策略。
+    """
+    try:
+        # classify_text 內部會透過快取載入模型與語意資源；這裡以背景執行緒先觸發一次。
+        await asyncio.to_thread(classify_text, "系統啟動預熱")
+        logger.info("Startup warmup: guardrail resources loaded")
+    except Exception as e:
+        # 降級策略：即使預熱失敗，也不要讓整體服務啟動失敗。
+        logger.warning(f"Startup warmup (guardrail) failed: {e}")
+
+
+async def _warmup_ollama_model() -> None:
+    """
+    啟動時預熱 Ollama LLM 模型。
+
+    設計目的：
+    1) 讓模型在服務啟動階段先進入記憶體，避免第一個聊天請求等待模型冷啟動。
+    2) 只做最小化請求（空 prompt + 非串流），降低預熱成本。
+
+    注意：
+    - 若 Ollama 當下不可用，僅記錄 warning，不阻塞後端服務啟動。
+    """
+    endpoint = settings.ollama_url.rstrip("/") + "/api/generate"
+    payload = {
+        "model": settings.ollama_model,
+        "prompt": "",
+        "stream": False,
+        "keep_alive": "30m",
+    }
+
+    try:
+        timeout = httpx.Timeout(
+            timeout=settings.request_timeout,
+            connect=settings.connect_timeout,
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(endpoint, json=payload)
+
+        if resp.status_code == 200:
+            logger.info(f"Startup warmup: Ollama model '{settings.ollama_model}' loaded")
+        else:
+            logger.warning(f"Startup warmup (ollama) failed: HTTP {resp.status_code} - {resp.text}")
+    except Exception as e:
+        logger.warning(f"Startup warmup (ollama) failed: {e}")
+
+
+@app.on_event("startup")
+async def startup_warmup() -> None:
+    """
+    服務啟動生命週期事件：並行執行模型預熱。
+
+    預熱內容：
+    - Guardrail 分類模型與語意資源
+    - Ollama 聊天模型
+
+    行為原則：
+    - 預熱是最佳化步驟，不是啟動必要條件
+    - 任一預熱失敗都不會中止服務，僅記錄日誌供後續排查
+    """
+    logger.info("Startup warmup: begin")
+    await asyncio.gather(
+        _warmup_guardrail_model(),
+        _warmup_ollama_model(),
+    )
+    logger.info("Startup warmup: end")
 
 
 @app.get("/health")
