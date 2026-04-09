@@ -26,7 +26,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Add CORS middleware
+# 啟動預熱時讓模型常駐記憶體的時間；可依部署資源與流量型態調整。
+OLLAMA_WARMUP_KEEP_ALIVE = "30m"
+OLLAMA_WARMUP_PROMPT = "warmup"
+GUARDRAIL_WARMUP_TEXT = "系統啟動預熱"
+
+
 async def _warmup_guardrail_model() -> None:
     """
     啟動時預熱 Guardrail 模型資源。
@@ -37,7 +42,7 @@ async def _warmup_guardrail_model() -> None:
     """
     try:
         # classify_text 內部會透過快取載入模型與語意資源；這裡以背景執行緒先觸發一次。
-        await asyncio.to_thread(classify_text, "系統啟動預熱")
+        await asyncio.to_thread(classify_text, GUARDRAIL_WARMUP_TEXT)
         logger.info("Startup warmup: guardrail resources loaded")
     except Exception as e:
         # 降級策略：即使預熱失敗，也不要讓整體服務啟動失敗。
@@ -58,9 +63,9 @@ async def _warmup_ollama_model() -> None:
     endpoint = settings.ollama_url.rstrip("/") + "/api/generate"
     payload = {
         "model": settings.ollama_model,
-        "prompt": "",
+        "prompt": OLLAMA_WARMUP_PROMPT,
         "stream": False,
-        "keep_alive": "30m",
+        "keep_alive": OLLAMA_WARMUP_KEEP_ALIVE,
     }
 
     try:
@@ -96,7 +101,6 @@ async def lifespan(_: FastAPI):
     await asyncio.gather(
         _warmup_guardrail_model(),
         _warmup_ollama_model(),
-        return_exceptions=True,
     )
     logger.info("Startup warmup: end")
     yield
