@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import logging
 import asyncio
+from contextlib import asynccontextmanager
 
 from app.routers.ws import router as ws_router
 from app.services.guardrail import classify_text
@@ -25,18 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="CS_Agent_Backend_WS")
-
 # Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 async def _warmup_guardrail_model() -> None:
     """
     啟動時預熱 Guardrail 模型資源。
@@ -89,8 +79,8 @@ async def _warmup_ollama_model() -> None:
         logger.warning(f"Startup warmup (ollama) failed: {e}")
 
 
-@app.on_event("startup")
-async def startup_warmup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     """
     服務啟動生命週期事件：並行執行模型預熱。
 
@@ -106,8 +96,22 @@ async def startup_warmup() -> None:
     await asyncio.gather(
         _warmup_guardrail_model(),
         _warmup_ollama_model(),
+        return_exceptions=True,
     )
     logger.info("Startup warmup: end")
+    yield
+
+
+app = FastAPI(title="CS_Agent_Backend_WS", lifespan=lifespan)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
