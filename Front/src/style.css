@@ -26,6 +26,60 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+.profile-page {
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.profile-card {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 24px;
+}
+
+.profile-card h1 {
+    margin: 0 0 16px;
+    font-size: 1.25rem;
+}
+
+.profile-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.profile-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.95rem;
+}
+
+.profile-field input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+}
+
+.profile-error {
+    color: #fca5a5;
+    font-size: 0.9rem;
+}
+
+.profile-submit {
+    margin-top: 4px;
+}
+
 /* ---------- app wrapper：控制整體下移與內縮 ---------- */
 .app-card {
     display: block;
@@ -183,6 +237,19 @@ body {
     min-width: 84px;
 }
 .btn-send:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn-end {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    cursor: pointer;
+    min-width: 96px;
+}
+.btn-end:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 /* ---------- Empty / samples ---------- */
 .empty { margin-top: 5rem; text-align: center; color: var(--muted); }

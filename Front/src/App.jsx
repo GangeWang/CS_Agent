@@ -44,6 +44,13 @@ const katexAllowed = {
     }
 }
 
+const WS_URL = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
+
+function validatePhone(value) {
+    const digits = value.replace(/\D/g, '')
+    return digits.length >= 8 && digits.length <= 15
+}
+
 /**
  * MarkdownViewer
  * - 支援 GFM 與 LaTeX（remark-math + rehype-katex）
@@ -72,8 +79,12 @@ export default function App() {
     ])
     // 使用者輸入框內容
     const [input, setInput] = useState('')
+    const [profileForm, setProfileForm] = useState({ name: '', phone: '' })
+    const [profileError, setProfileError] = useState('')
+    const [userProfile, setUserProfile] = useState(null)
     // 是否正在等待/接收後端回覆（控制送出按鈕與 UI 狀態）
     const [isLoading, setIsLoading] = useState(false)
+    const [isConversationEnded, setIsConversationEnded] = useState(false)
     const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
     // 聊天面板 DOM 參照，用於自動滾動到底部
     const panelRef = useRef(null)
@@ -97,9 +108,7 @@ export default function App() {
     }, [messages])
 
     // 根據頁面協議動態選擇 ws / wss，避免 HTTPS 頁面混用不安全 ws
-    const wsUrl = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
-
-    const connectWs = useCallback((url = wsUrl) => {
+    const connectWs = useCallback((url = WS_URL) => {
         // 如果已連線或正在連線，就不重複建立，避免多條 socket 造成狀態錯亂
         const existing = wsRef.current
         if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return
@@ -142,7 +151,7 @@ export default function App() {
             scheduleReconnect(url)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsUrl])
+    }, [])
 
     function waitForWsOpen(ws, timeout = 3000) {
         // 把 WebSocket 事件轉為 Promise，讓 sendMessage 可 await 連線完成
@@ -193,7 +202,7 @@ export default function App() {
         heartbeatRef.current.missed = 0
     }
 
-    function scheduleReconnect(url = wsUrl) {
+    function scheduleReconnect(url = WS_URL) {
         reconnectAttempts.current = Math.min(10, reconnectAttempts.current + 1)
         const attempt = reconnectAttempts.current
         // 指數退避，避免重連風暴；最大延遲 30 秒
@@ -256,6 +265,20 @@ export default function App() {
 
     function handleWsPayload(payload) {
         if (!payload || typeof payload !== 'object') return
+        if (payload.type === 'conversation_summary') {
+            const summaryText = payload.summary || '本次對話摘要產生失敗。'
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: `### 對話摘要\n${summaryText}` }])
+            return
+        }
+
+        if (payload.type === 'conversation_ended') {
+            setIsConversationEnded(true)
+            setIsLoading(false)
+            pendingAssistantId.current = null
+            clearFlushTimer()
+            return
+        }
+
         if (payload.type === 'delta') {
             // 串流片段先進 buffer，再由 flush timer 批次更新 UI
             const delta = payload.text || ''
@@ -305,6 +328,8 @@ export default function App() {
     }
 
     async function sendMessage() {
+        if (!userProfile) return
+        if (isConversationEnded) return
         const trimmed = input.trim()
         if (!trimmed) return
         if (pendingAssistantId.current) {
@@ -325,7 +350,7 @@ export default function App() {
         try {
             if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
                 // 若 socket 尚未就緒，先建連線並等待 open
-                connectWs(wsUrl)
+                connectWs(WS_URL)
                 await waitForWsOpen(wsRef.current, 5000)
             }
         } catch (e) {
@@ -341,7 +366,8 @@ export default function App() {
             const ws = wsRef.current
             const payload = {
                 model: 'gpt-oss:20b',
-                messages: [{ role: 'user', content: trimmed }]
+                messages: [{ role: 'user', content: trimmed }],
+                user_info: userProfile
             }
             // 請求格式與後端約定一致：model + messages[]
             ws.send(JSON.stringify(payload))
@@ -355,9 +381,29 @@ export default function App() {
         }
     }
 
+    function endConversation() {
+        if (isConversationEnded) return
+        setIsLoading(true)
+        try {
+            const ws = wsRef.current
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'end_conversation' }))
+                return
+            }
+            setIsConversationEnded(true)
+            setIsLoading(false)
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: '對話已結束。' }])
+        } catch (e) {
+            console.error('End conversation error:', e)
+            setIsLoading(false)
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: '結束對話失敗，請稍後再試。' }])
+        }
+    }
+
     // connect on mount; cleanup on unmount
     useEffect(() => {
-        connectWs(wsUrl)
+        if (!userProfile) return
+        connectWs(WS_URL)
         return () => {
             try {
                 if (wsRef.current) wsRef.current.close()
@@ -369,8 +415,59 @@ export default function App() {
             stopHeartbeat()
             clearFlushTimer()
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [connectWs, userProfile])
+
+    function submitProfile(e) {
+        e.preventDefault()
+        const name = profileForm.name.trim()
+        const phone = profileForm.phone.trim()
+        if (!name || !phone) {
+            setProfileError('請輸入姓名與電話')
+            return
+        }
+        if (!validatePhone(phone)) {
+            setProfileError('請輸入有效電話號碼')
+            return
+        }
+        setProfileError('')
+        setUserProfile({ name, phone })
+        setIsConversationEnded(false)
+        setMessages([{ id: NEXT_ID(), role: 'assistant', text: `歡迎 ${name}！請輸入你的問題。` }])
+    }
+
+    if (!userProfile) {
+        return (
+            <div className="app profile-page">
+                <main className="profile-card">
+                    <h1>進入聊天前請先留資料</h1>
+                    <form className="profile-form" onSubmit={submitProfile}>
+                        <label className="profile-field">
+                            姓名
+                            <input
+                                type="text"
+                                value={profileForm.name}
+                                onChange={e => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder="請輸入姓名"
+                                maxLength={50}
+                            />
+                        </label>
+                        <label className="profile-field">
+                            電話
+                            <input
+                                type="tel"
+                                value={profileForm.phone}
+                                onChange={e => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                                placeholder="請輸入電話"
+                                maxLength={20}
+                            />
+                        </label>
+                        {profileError && <div className="profile-error">{profileError}</div>}
+                        <button className="btn-send profile-submit" type="submit">進入聊天</button>
+                    </form>
+                </main>
+            </div>
+        )
+    }
 
     return (
         <div className="app">
@@ -413,7 +510,7 @@ export default function App() {
                     className="row"
                     onSubmit={e => {
                         e.preventDefault()
-                        if (!isLoading && input.trim()) sendMessage()
+                        if (!isLoading && !isConversationEnded && input.trim()) sendMessage()
                     }}
                 >
                     <textarea
@@ -421,7 +518,7 @@ export default function App() {
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         placeholder="請輸入您的問題..."
-                        disabled={isLoading}
+                        disabled={isLoading || isConversationEnded}
                         aria-label="輸入訊息"
                         rows={3}
                         onCompositionStart={() => setIsComposing(true)}
@@ -433,12 +530,21 @@ export default function App() {
                                     return
                                 }
                                 e.preventDefault()
-                                if (!isLoading && input.trim()) sendMessage()
+                                if (!isLoading && !isConversationEnded && input.trim()) sendMessage()
                             }
                         }}
                     />
 
-                    <button className="btn-send" type="submit" disabled={isLoading || !input.trim()}>
+                    <button
+                        className="btn-end"
+                        type="button"
+                        disabled={isConversationEnded || isLoading}
+                        onClick={endConversation}
+                    >
+                        結束對話
+                    </button>
+
+                    <button className="btn-send" type="submit" disabled={isLoading || isConversationEnded || !input.trim()}>
                         {isLoading ? '傳送中...' : '發送'}
                     </button>
                 </form>
