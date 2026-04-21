@@ -44,6 +44,13 @@ const katexAllowed = {
     }
 }
 
+const WS_URL = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
+
+function validatePhone(value) {
+    const digits = value.replace(/\D/g, '')
+    return digits.length >= 8 && digits.length <= 15
+}
+
 /**
  * MarkdownViewer
  * - 支援 GFM 與 LaTeX（remark-math + rehype-katex）
@@ -100,14 +107,7 @@ export default function App() {
     }, [messages])
 
     // 根據頁面協議動態選擇 ws / wss，避免 HTTPS 頁面混用不安全 ws
-    const wsUrl = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
-
-    function validatePhone(value) {
-        const digits = value.replace(/\D/g, '')
-        return digits.length >= 8 && digits.length <= 15
-    }
-
-    const connectWs = useCallback((url = wsUrl) => {
+    const connectWs = useCallback((url = WS_URL) => {
         // 如果已連線或正在連線，就不重複建立，避免多條 socket 造成狀態錯亂
         const existing = wsRef.current
         if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) return
@@ -150,7 +150,7 @@ export default function App() {
             scheduleReconnect(url)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [wsUrl])
+    }, [])
 
     function waitForWsOpen(ws, timeout = 3000) {
         // 把 WebSocket 事件轉為 Promise，讓 sendMessage 可 await 連線完成
@@ -201,7 +201,7 @@ export default function App() {
         heartbeatRef.current.missed = 0
     }
 
-    function scheduleReconnect(url = wsUrl) {
+    function scheduleReconnect(url = WS_URL) {
         reconnectAttempts.current = Math.min(10, reconnectAttempts.current + 1)
         const attempt = reconnectAttempts.current
         // 指數退避，避免重連風暴；最大延遲 30 秒
@@ -334,7 +334,7 @@ export default function App() {
         try {
             if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
                 // 若 socket 尚未就緒，先建連線並等待 open
-                connectWs(wsUrl)
+                connectWs(WS_URL)
                 await waitForWsOpen(wsRef.current, 5000)
             }
         } catch (e) {
@@ -368,7 +368,7 @@ export default function App() {
     // connect on mount; cleanup on unmount
     useEffect(() => {
         if (!userProfile) return
-        connectWs(wsUrl)
+        connectWs(WS_URL)
         return () => {
             try {
                 if (wsRef.current) wsRef.current.close()
@@ -380,7 +380,7 @@ export default function App() {
             stopHeartbeat()
             clearFlushTimer()
         }
-    }, [connectWs, userProfile, wsUrl])
+    }, [connectWs, userProfile])
 
     function submitProfile(e) {
         e.preventDefault()
@@ -396,7 +396,7 @@ export default function App() {
         }
         setProfileError('')
         setUserProfile({ name, phone })
-        setMessages([{ id: 1, role: 'assistant', text: `歡迎 ${name}！請輸入你的問題。` }])
+        setMessages([{ id: NEXT_ID(), role: 'assistant', text: `歡迎 ${name}！請輸入你的問題。` }])
     }
 
     if (!userProfile) {
