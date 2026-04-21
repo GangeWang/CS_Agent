@@ -94,7 +94,7 @@ CS_Agent/
 ### 1) 啟動後端
 
 ```bash
-cd /home/runner/work/CS_Agent/CS_Agent/backend
+cd backend
 python3 -m pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
@@ -102,7 +102,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### 2) 啟動前端
 
 ```bash
-cd /home/runner/work/CS_Agent/CS_Agent/Front
+cd Front
 npm ci
 npm run dev
 ```
@@ -175,7 +175,7 @@ Server 事件：
 ### 前端
 
 ```bash
-cd /home/runner/work/CS_Agent/CS_Agent/Front
+cd Front
 npm run lint
 npm run build
 ```
@@ -183,7 +183,7 @@ npm run build
 ### 後端
 
 ```bash
-cd /home/runner/work/CS_Agent/CS_Agent/backend
+cd backend
 python3 test.py
 ```
 
