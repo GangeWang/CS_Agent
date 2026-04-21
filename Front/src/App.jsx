@@ -280,9 +280,17 @@ export default function App() {
         }
 
         if (payload.type === 'idle_warning') {
+            const defaultRemainingSeconds = 60
+            const parsedRemainingSeconds = Number(payload.remaining_seconds)
+            const remainingSeconds = Number.isFinite(parsedRemainingSeconds) && parsedRemainingSeconds > 0
+                ? parsedRemainingSeconds
+                : defaultRemainingSeconds
+            const remainingTimeText = remainingSeconds < 60
+                ? `${Math.ceil(remainingSeconds)} 秒`
+                : `${Math.ceil(remainingSeconds / 60)} 分鐘`
             setMessages(prev => [
                 ...prev,
-                { id: NEXT_ID(), role: 'assistant', text: '提醒：若 1 分鐘內沒有新對話，對話將自動關閉。' }
+                { id: NEXT_ID(), role: 'assistant', text: `提醒：若 ${remainingTimeText}內沒有新對話，對話將自動關閉。` }
             ])
             return
         }

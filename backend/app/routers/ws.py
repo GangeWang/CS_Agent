@@ -6,6 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
 import asyncio
 import logging
+import math
 from typing import Dict, List
 from cachetools import TTLCache
 
@@ -148,10 +149,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                 if (
                     not idle_warning_sent
                     and idle_elapsed >= (IDLE_TIMEOUT_SECONDS - IDLE_WARNING_SECONDS_BEFORE_END)
+                    and idle_elapsed < IDLE_TIMEOUT_SECONDS
                 ):
+                    remaining_seconds = max(0, math.ceil(IDLE_TIMEOUT_SECONDS - idle_elapsed))
                     await websocket.send_text(json_dumps({
                         "type": "idle_warning",
-                        "remaining_seconds": IDLE_WARNING_SECONDS_BEFORE_END
+                        "remaining_seconds": remaining_seconds
                     }))
                     idle_warning_sent = True
                 await websocket.send_text(json_dumps({"type": "pong"}))
