@@ -46,6 +46,8 @@ ws://<目前網頁主機>:8000/ws/chat
 
 ```bash
 VITE_WS_URL=ws://your-host:8000/ws/chat
+# 或只覆蓋連線埠
+VITE_WS_PORT=8000
 ```
 
 ## 功能摘要

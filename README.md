@@ -31,6 +31,8 @@ npm run dev
 
 ```bash
 VITE_WS_URL=ws://your-host:8000/ws/chat
+# 或只覆蓋連線埠
+VITE_WS_PORT=8000
 ```
 
 ## 主要功能
@@ -58,7 +60,7 @@ cd backend
 python3 test.py
 ```
 
-> `backend/test.py` 需要可連線的 Ollama（預設 `127.0.0.1:11434`）。
+> `backend/test.py` 需要可連線的 Ollama (預設 `127.0.0.1:11434`)。
 
 ## 授權
 

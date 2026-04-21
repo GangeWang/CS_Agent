@@ -36,7 +36,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 |---|---|---|
 | `OLLAMA_MODEL` | `cs-agent-v17` | 預設模型名稱 |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama 位址 |
-| `OLLAMA_DEBUG` | `false` | 是否開啟除錯日誌 |
+| `OLLAMA_DEBUG` | `false` | 是否開啟除錯日誌（布林值） |
 | `MAX_MESSAGE_SIZE` | `10240` | WebSocket 單次訊息大小上限（bytes） |
 | `HISTORY_MAX_LENGTH` | `20` | 每個 session 保留對話筆數上限 |
 | `REQUEST_TIMEOUT` | `30.0` | HTTP 請求超時（秒） |

@@ -7,7 +7,7 @@ import json
 import asyncio
 import logging
 import math
-from typing import Dict, List
+from typing import Any, Dict, List
 from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
@@ -59,6 +59,17 @@ def _build_history_for_summary(history: List[Dict[str, str]]) -> str:
         elif role == "assistant":
             lines.append(f"客服助手：{content}")
     return "\n".join(lines)
+
+
+def _get_latest_user_message(messages: List[Dict[str, Any]]) -> str | None:
+    if not isinstance(messages, list):
+        return None
+    for item in reversed(messages):
+        if isinstance(item, dict) and item.get("role") == "user":
+            content = item.get("content")
+            if isinstance(content, str) and content:
+                return content
+    return None
 
 
 def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | None) -> str:
@@ -172,12 +183,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 break
 
             messages = payload.get("messages", [])
-            user_msg = None
-            if isinstance(messages, list):
-                for m in reversed(messages):
-                    if isinstance(m, dict) and m.get("role") == "user":
-                        user_msg = m.get("content")
-                        break
+            user_msg = _get_latest_user_message(messages)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
