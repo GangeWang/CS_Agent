@@ -279,6 +279,14 @@ export default function App() {
             return
         }
 
+        if (payload.type === 'idle_warning') {
+            setMessages(prev => [
+                ...prev,
+                { id: NEXT_ID(), role: 'assistant', text: '提醒：若 1 分鐘內沒有新對話，對話將自動關閉。' }
+            ])
+            return
+        }
+
         if (payload.type === 'delta') {
             // 串流片段先進 buffer，再由 flush timer 批次更新 UI
             const delta = payload.text || ''

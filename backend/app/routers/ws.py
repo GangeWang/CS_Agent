@@ -6,6 +6,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
 import asyncio
 import logging
+import math
 from typing import Dict, List
 from cachetools import TTLCache
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 IDLE_TIMEOUT_SECONDS = 180
+IDLE_WARNING_SECONDS_BEFORE_END = 60
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -31,7 +33,6 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
 
 
 def _build_guardrail_instruction(label: str) -> str:
-    print(label)
     if label == "ABUSIVE":
         return (
             "你是客服助理。使用者情緒可能較激動，請先簡短同理與降溫，"
@@ -104,14 +105,14 @@ async def ws_chat(websocket: WebSocket) -> None:
     session_id = id(websocket)
     conversation_sessions[session_id] = []
     last_dialogue_at = loop.time()
+    idle_warning_sent = False
     last_model: str | None = None
     logger.info(f"WebSocket connection established: session_id={session_id}")
 
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
         summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
-        print(summary)
-        await websocket.send_text(json_dumps({
+        '''await websocket.send_text(json_dumps({
             "type": "conversation_summary",
             "reason": reason,
             "summary": summary
@@ -119,7 +120,7 @@ async def ws_chat(websocket: WebSocket) -> None:
         await websocket.send_text(json_dumps({
             "type": "conversation_ended",
             "reason": reason
-        }))
+        }))'''
         await websocket.close(code=1000, reason="conversation ended")
 
     try:
@@ -141,17 +142,28 @@ async def ws_chat(websocket: WebSocket) -> None:
                 continue
 
             if payload.get("type") == "ping":
-                if loop.time() - last_dialogue_at >(IDLE_TIMEOUT_SECONDS-60):
-                    await websocket.send_text("已經兩分鐘沒有收到您的回應，對話將於一分鐘後自動關閉")
-                if loop.time() - last_dialogue_at > IDLE_TIMEOUT_SECONDS:
+                idle_elapsed = loop.time() - last_dialogue_at
+                if idle_elapsed > IDLE_TIMEOUT_SECONDS:
                     await end_conversation("idle_timeout", last_model)
                     break
+                if (
+                    not idle_warning_sent
+                    and idle_elapsed >= (IDLE_TIMEOUT_SECONDS - IDLE_WARNING_SECONDS_BEFORE_END)
+                    and idle_elapsed < IDLE_TIMEOUT_SECONDS
+                ):
+                    remaining_seconds = max(0, math.ceil(IDLE_TIMEOUT_SECONDS - idle_elapsed))
+                    await websocket.send_text(json_dumps({
+                        "type": "idle_warning",
+                        "remaining_seconds": remaining_seconds
+                    }))
+                    idle_warning_sent = True
                 await websocket.send_text(json_dumps({"type": "pong"}))
                 continue
 
             if payload.get("type") == "clear_history":
                 conversation_sessions[session_id] = []
                 last_dialogue_at = loop.time()
+                idle_warning_sent = False
                 await websocket.send_text(json_dumps({"type": "history_cleared"}))
                 continue
 
@@ -165,6 +177,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
             last_dialogue_at = loop.time()
+            idle_warning_sent = False
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
