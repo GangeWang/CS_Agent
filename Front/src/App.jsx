@@ -72,6 +72,9 @@ export default function App() {
     ])
     // 使用者輸入框內容
     const [input, setInput] = useState('')
+    const [profileForm, setProfileForm] = useState({ name: '', phone: '' })
+    const [profileError, setProfileError] = useState('')
+    const [userProfile, setUserProfile] = useState(null)
     // 是否正在等待/接收後端回覆（控制送出按鈕與 UI 狀態）
     const [isLoading, setIsLoading] = useState(false)
     const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
@@ -98,6 +101,11 @@ export default function App() {
 
     // 根據頁面協議動態選擇 ws / wss，避免 HTTPS 頁面混用不安全 ws
     const wsUrl = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
+
+    function validatePhone(value) {
+        const digits = value.replace(/\D/g, '')
+        return digits.length >= 8 && digits.length <= 15
+    }
 
     const connectWs = useCallback((url = wsUrl) => {
         // 如果已連線或正在連線，就不重複建立，避免多條 socket 造成狀態錯亂
@@ -305,6 +313,7 @@ export default function App() {
     }
 
     async function sendMessage() {
+        if (!userProfile) return
         const trimmed = input.trim()
         if (!trimmed) return
         if (pendingAssistantId.current) {
@@ -341,7 +350,8 @@ export default function App() {
             const ws = wsRef.current
             const payload = {
                 model: 'gpt-oss:20b',
-                messages: [{ role: 'user', content: trimmed }]
+                messages: [{ role: 'user', content: trimmed }],
+                user_info: userProfile
             }
             // 請求格式與後端約定一致：model + messages[]
             ws.send(JSON.stringify(payload))
@@ -357,6 +367,7 @@ export default function App() {
 
     // connect on mount; cleanup on unmount
     useEffect(() => {
+        if (!userProfile) return
         connectWs(wsUrl)
         return () => {
             try {
@@ -369,8 +380,58 @@ export default function App() {
             stopHeartbeat()
             clearFlushTimer()
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [connectWs, userProfile, wsUrl])
+
+    function submitProfile(e) {
+        e.preventDefault()
+        const name = profileForm.name.trim()
+        const phone = profileForm.phone.trim()
+        if (!name || !phone) {
+            setProfileError('請輸入姓名與電話')
+            return
+        }
+        if (!validatePhone(phone)) {
+            setProfileError('請輸入有效電話號碼')
+            return
+        }
+        setProfileError('')
+        setUserProfile({ name, phone })
+        setMessages([{ id: 1, role: 'assistant', text: `歡迎 ${name}！請輸入你的問題。` }])
+    }
+
+    if (!userProfile) {
+        return (
+            <div className="app profile-page">
+                <main className="profile-card">
+                    <h1>進入聊天前請先留資料</h1>
+                    <form className="profile-form" onSubmit={submitProfile}>
+                        <label className="profile-field">
+                            姓名
+                            <input
+                                type="text"
+                                value={profileForm.name}
+                                onChange={e => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder="請輸入姓名"
+                                maxLength={50}
+                            />
+                        </label>
+                        <label className="profile-field">
+                            電話
+                            <input
+                                type="tel"
+                                value={profileForm.phone}
+                                onChange={e => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
+                                placeholder="請輸入電話"
+                                maxLength={20}
+                            />
+                        </label>
+                        {profileError && <div className="profile-error">{profileError}</div>}
+                        <button className="btn-send profile-submit" type="submit">進入聊天</button>
+                    </form>
+                </main>
+            </div>
+        )
+    }
 
     return (
         <div className="app">
