@@ -513,7 +513,7 @@ export default function App() {
                         if (!isLoading && !isConversationEnded && input.trim()) sendMessage()
                     }}
                 >
-                     <textarea
+                    <textarea
                         className="input"
                         value={input}
                         onChange={e => setInput(e.target.value)}
@@ -544,7 +544,7 @@ export default function App() {
                         結束對話
                     </button>
 
-                    <button className="btn-send" type="submit" disabled={isLoading || !input.trim()}>
+                    <button className="btn-send" type="submit" disabled={isLoading || isConversationEnded || !input.trim()}>
                         {isLoading ? '傳送中...' : '發送'}
                     </button>
                 </form>

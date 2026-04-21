@@ -103,11 +103,12 @@ async def ws_chat(websocket: WebSocket) -> None:
     session_id = id(websocket)
     conversation_sessions[session_id] = []
     last_dialogue_at = loop.time()
+    last_model: str | None = None
     logger.info(f"WebSocket connection established: session_id={session_id}")
 
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
-        summary = await asyncio.to_thread(_summarize_conversation_sync, history.copy(), model)
+        summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
         await websocket.send_text(json_dumps({
             "type": "conversation_summary",
             "reason": reason,
@@ -117,7 +118,6 @@ async def ws_chat(websocket: WebSocket) -> None:
             "type": "conversation_ended",
             "reason": reason
         }))
-        conversation_sessions[session_id] = []
         await websocket.close(code=1000, reason="conversation ended")
 
     try:
@@ -140,7 +140,7 @@ async def ws_chat(websocket: WebSocket) -> None:
 
             if payload.get("type") == "ping":
                 if loop.time() - last_dialogue_at > IDLE_TIMEOUT_SECONDS:
-                    await end_conversation("idle_timeout")
+                    await end_conversation("idle_timeout", last_model)
                     break
                 await websocket.send_text(json_dumps({"type": "pong"}))
                 continue
@@ -152,7 +152,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 continue
 
             if payload.get("type") == "end_conversation":
-                await end_conversation("manual")
+                await end_conversation("manual", last_model)
                 break
 
             messages = payload.get("messages", [])
@@ -168,6 +168,8 @@ async def ws_chat(websocket: WebSocket) -> None:
             await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
 
             model = payload.get("model")
+            if isinstance(model, str) and model.strip():
+                last_model = model
             history: List[Dict[str, str]] = conversation_sessions[session_id]
 
             # 不改 request_stream_sync 簽名：把 system instruction 注入 history
