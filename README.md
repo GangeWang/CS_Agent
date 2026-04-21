@@ -21,8 +21,8 @@ CS_Agent/
 
 詳細說明請看：
 
-- 前端文件：`/home/runner/work/CS_Agent/CS_Agent/Front/README.md`
-- 後端文件：`/home/runner/work/CS_Agent/CS_Agent/backend/README.md`
+- 前端文件：`Front/README.md`
+- 後端文件：`backend/README.md`
 
 ## 快速開始
 
