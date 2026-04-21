@@ -95,6 +95,11 @@ WebSocket endpoint for streaming chat with conversation memory.
 {"type": "clear_history"}
 ```
 
+**End Conversation (manual):**
+```json
+{"type": "end_conversation"}
+```
+
 **Server Responses:**
 ```json
 {"type": "delta", "text": "streaming text..."}
@@ -102,7 +107,14 @@ WebSocket endpoint for streaming chat with conversation memory.
 {"type": "error", "error": "error message"}
 {"type": "pong"}
 {"type": "history_cleared"}
+{"type": "conversation_summary", "reason": "manual|idle_timeout", "summary": "..."}
+{"type": "conversation_ended", "reason": "manual|idle_timeout"}
 ```
+
+### Auto End on Inactivity
+
+- If there is no real dialogue message for more than 3 minutes, backend will auto end the conversation.
+- When ending (manual or timeout), backend asks LLM to generate a summary and sends it to frontend before closing the WebSocket.
 
 ## Architecture
 

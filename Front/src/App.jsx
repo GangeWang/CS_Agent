@@ -84,6 +84,7 @@ export default function App() {
     const [userProfile, setUserProfile] = useState(null)
     // 是否正在等待/接收後端回覆（控制送出按鈕與 UI 狀態）
     const [isLoading, setIsLoading] = useState(false)
+    const [isConversationEnded, setIsConversationEnded] = useState(false)
     const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
     // 聊天面板 DOM 參照，用於自動滾動到底部
     const panelRef = useRef(null)
@@ -264,6 +265,20 @@ export default function App() {
 
     function handleWsPayload(payload) {
         if (!payload || typeof payload !== 'object') return
+        if (payload.type === 'conversation_summary') {
+            const summaryText = payload.summary || '本次對話摘要產生失敗。'
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: `### 對話摘要\n${summaryText}` }])
+            return
+        }
+
+        if (payload.type === 'conversation_ended') {
+            setIsConversationEnded(true)
+            setIsLoading(false)
+            pendingAssistantId.current = null
+            clearFlushTimer()
+            return
+        }
+
         if (payload.type === 'delta') {
             // 串流片段先進 buffer，再由 flush timer 批次更新 UI
             const delta = payload.text || ''
@@ -314,6 +329,7 @@ export default function App() {
 
     async function sendMessage() {
         if (!userProfile) return
+        if (isConversationEnded) return
         const trimmed = input.trim()
         if (!trimmed) return
         if (pendingAssistantId.current) {
@@ -365,6 +381,25 @@ export default function App() {
         }
     }
 
+    function endConversation() {
+        if (isConversationEnded) return
+        setIsLoading(true)
+        try {
+            const ws = wsRef.current
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'end_conversation' }))
+                return
+            }
+            setIsConversationEnded(true)
+            setIsLoading(false)
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: '對話已結束。' }])
+        } catch (e) {
+            console.error('End conversation error:', e)
+            setIsLoading(false)
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: '結束對話失敗，請稍後再試。' }])
+        }
+    }
+
     // connect on mount; cleanup on unmount
     useEffect(() => {
         if (!userProfile) return
@@ -396,6 +431,7 @@ export default function App() {
         }
         setProfileError('')
         setUserProfile({ name, phone })
+        setIsConversationEnded(false)
         setMessages([{ id: NEXT_ID(), role: 'assistant', text: `歡迎 ${name}！請輸入你的問題。` }])
     }
 
@@ -474,15 +510,15 @@ export default function App() {
                     className="row"
                     onSubmit={e => {
                         e.preventDefault()
-                        if (!isLoading && input.trim()) sendMessage()
+                        if (!isLoading && !isConversationEnded && input.trim()) sendMessage()
                     }}
                 >
-                    <textarea
+                     <textarea
                         className="input"
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         placeholder="請輸入您的問題..."
-                        disabled={isLoading}
+                        disabled={isLoading || isConversationEnded}
                         aria-label="輸入訊息"
                         rows={3}
                         onCompositionStart={() => setIsComposing(true)}
@@ -494,10 +530,19 @@ export default function App() {
                                     return
                                 }
                                 e.preventDefault()
-                                if (!isLoading && input.trim()) sendMessage()
+                                if (!isLoading && !isConversationEnded && input.trim()) sendMessage()
                             }
                         }}
                     />
+
+                    <button
+                        className="btn-end"
+                        type="button"
+                        disabled={isConversationEnded || isLoading}
+                        onClick={endConversation}
+                    >
+                        結束對話
+                    </button>
 
                     <button className="btn-send" type="submit" disabled={isLoading || !input.trim()}>
                         {isLoading ? '傳送中...' : '發送'}

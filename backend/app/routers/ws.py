@@ -18,6 +18,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
+IDLE_TIMEOUT_SECONDS = 180
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -44,13 +45,80 @@ def _build_guardrail_instruction(label: str) -> str:
     return "你是客服助理。請直接、清楚、禮貌地回覆使用者問題。"
 
 
+def _build_history_for_summary(history: List[Dict[str, str]]) -> str:
+    lines: List[str] = []
+    for item in history:
+        role = item.get("role")
+        content = item.get("content", "")
+        if not content:
+            continue
+        if role == "user":
+            lines.append(f"使用者：{content}")
+        elif role == "assistant":
+            lines.append(f"客服助手：{content}")
+    return "\n".join(lines)
+
+
+def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | None) -> str:
+    if not history:
+        return "本次對話沒有可摘要的內容。"
+
+    dialogue = _build_history_for_summary(history)
+    summary_prompt = (
+        "請用繁體中文整理以下客服對話摘要，格式需包含：\n"
+        "1. 問題重點\n"
+        "2. 已提供的協助\n"
+        "3. 後續建議（若無則寫無）\n\n"
+        f"對話內容：\n{dialogue}"
+    )
+
+    chunks: List[str] = []
+    error_text: List[str] = []
+
+    def on_chunk(chunk: dict) -> None:
+        if chunk.get("type") == "delta":
+            chunks.append(chunk.get("text", ""))
+        if chunk.get("type") == "error":
+            error_text.append(chunk.get("error", ""))
+
+    request_stream_sync(
+        summary_prompt,
+        model,
+        on_chunk,
+        None,
+    )
+
+    summary = "".join(chunks).strip()
+    if summary:
+        return summary
+    if error_text:
+        return f"摘要產生失敗：{error_text[-1]}"
+    return "摘要產生失敗，請稍後再試。"
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
     await websocket.accept()
     loop = asyncio.get_event_loop()
     session_id = id(websocket)
     conversation_sessions[session_id] = []
+    last_dialogue_at = loop.time()
     logger.info(f"WebSocket connection established: session_id={session_id}")
+
+    async def end_conversation(reason: str, model: str | None = None) -> None:
+        history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
+        summary = await asyncio.to_thread(_summarize_conversation_sync, history.copy(), model)
+        await websocket.send_text(json_dumps({
+            "type": "conversation_summary",
+            "reason": reason,
+            "summary": summary
+        }))
+        await websocket.send_text(json_dumps({
+            "type": "conversation_ended",
+            "reason": reason
+        }))
+        conversation_sessions[session_id] = []
+        await websocket.close(code=1000, reason="conversation ended")
 
     try:
         while True:
@@ -71,19 +139,28 @@ async def ws_chat(websocket: WebSocket) -> None:
                 continue
 
             if payload.get("type") == "ping":
+                if loop.time() - last_dialogue_at > IDLE_TIMEOUT_SECONDS:
+                    await end_conversation("idle_timeout")
+                    break
                 await websocket.send_text(json_dumps({"type": "pong"}))
                 continue
 
             if payload.get("type") == "clear_history":
                 conversation_sessions[session_id] = []
+                last_dialogue_at = loop.time()
                 await websocket.send_text(json_dumps({"type": "history_cleared"}))
                 continue
+
+            if payload.get("type") == "end_conversation":
+                await end_conversation("manual")
+                break
 
             messages = payload.get("messages", [])
             user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
+            last_dialogue_at = loop.time()
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
@@ -153,4 +230,3 @@ async def ws_chat(websocket: WebSocket) -> None:
     finally:
         conversation_sessions.pop(session_id, None)
         logger.info(f"Session cleaned up: session_id={session_id}")
-

@@ -237,6 +237,19 @@ body {
     min-width: 84px;
 }
 .btn-send:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn-end {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    cursor: pointer;
+    min-width: 96px;
+}
+.btn-end:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 /* ---------- Empty / samples ---------- */
 .empty { margin-top: 5rem; text-align: center; color: var(--muted); }
