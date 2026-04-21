@@ -44,7 +44,9 @@ const katexAllowed = {
     }
 }
 
-const WS_URL = (window.location.protocol === 'https:' ? 'wss' : 'ws') + '://100.111.80.10:8000/ws/chat'
+const WS_PORT = import.meta.env.VITE_WS_PORT || '8000'
+const WS_URL = import.meta.env.VITE_WS_URL
+    || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:${WS_PORT}/ws/chat`
 
 function validatePhone(value) {
     const digits = value.replace(/\D/g, '')
@@ -140,6 +142,9 @@ export default function App() {
 
             ws.onclose = (ev) => {
                 stopHeartbeat()
+                setIsLoading(false)
+                pendingAssistantId.current = null
+                clearFlushTimer()
                 if (!ev.wasClean) scheduleReconnect(url)
             }
 
