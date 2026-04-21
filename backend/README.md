@@ -107,6 +107,7 @@ WebSocket endpoint for streaming chat with conversation memory.
 {"type": "error", "error": "error message"}
 {"type": "pong"}
 {"type": "history_cleared"}
+{"type": "idle_warning", "remaining_seconds": 60}
 {"type": "conversation_summary", "reason": "manual|idle_timeout", "summary": "..."}
 {"type": "conversation_ended", "reason": "manual|idle_timeout"}
 ```
@@ -114,6 +115,7 @@ WebSocket endpoint for streaming chat with conversation memory.
 ### Auto End on Inactivity
 
 - If there is no real dialogue message for more than 3 minutes, backend will auto end the conversation.
+- If inactivity reaches 2 minutes, backend sends an `idle_warning` event to remind that the conversation will close in 1 minute.
 - When ending (manual or timeout), backend asks LLM to generate a summary and sends it to frontend before closing the WebSocket.
 
 ## Architecture

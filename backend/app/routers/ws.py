@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 IDLE_TIMEOUT_SECONDS = 180
+IDLE_WARNING_SECONDS_BEFORE_END = 60
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -103,6 +104,7 @@ async def ws_chat(websocket: WebSocket) -> None:
     session_id = id(websocket)
     conversation_sessions[session_id] = []
     last_dialogue_at = loop.time()
+    idle_warning_sent = False
     last_model: str | None = None
     logger.info(f"WebSocket connection established: session_id={session_id}")
 
@@ -139,15 +141,26 @@ async def ws_chat(websocket: WebSocket) -> None:
                 continue
 
             if payload.get("type") == "ping":
-                if loop.time() - last_dialogue_at > IDLE_TIMEOUT_SECONDS:
+                idle_elapsed = loop.time() - last_dialogue_at
+                if idle_elapsed > IDLE_TIMEOUT_SECONDS:
                     await end_conversation("idle_timeout", last_model)
                     break
+                if (
+                    not idle_warning_sent
+                    and idle_elapsed >= (IDLE_TIMEOUT_SECONDS - IDLE_WARNING_SECONDS_BEFORE_END)
+                ):
+                    await websocket.send_text(json_dumps({
+                        "type": "idle_warning",
+                        "remaining_seconds": IDLE_WARNING_SECONDS_BEFORE_END
+                    }))
+                    idle_warning_sent = True
                 await websocket.send_text(json_dumps({"type": "pong"}))
                 continue
 
             if payload.get("type") == "clear_history":
                 conversation_sessions[session_id] = []
                 last_dialogue_at = loop.time()
+                idle_warning_sent = False
                 await websocket.send_text(json_dumps({"type": "history_cleared"}))
                 continue
 
@@ -161,6 +174,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
             last_dialogue_at = loop.time()
+            idle_warning_sent = False
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
