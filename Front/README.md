@@ -1,16 +1,66 @@
-# React + Vite
+# CS_Agent Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite 前端，提供客服聊天 UI，透過 WebSocket 與後端串流互動。
 
-Currently, two official plugins are available:
+## 技術
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19
+- Vite
+- react-markdown + remark/rehype
+- KaTeX
 
-## React Compiler
+## 安裝
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+cd Front
+npm ci
+```
 
-## Expanding the ESLint configuration
+## 啟動
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm run dev
+```
+
+## 建置
+
+```bash
+npm run build
+```
+
+## Lint
+
+```bash
+npm run lint
+```
+
+## WebSocket 設定
+
+預設會連線到：
+
+```text
+ws://<目前網頁主機>:8000/ws/chat
+```
+
+若要指定其他位址，設定：
+
+```bash
+VITE_WS_URL=ws://your-host:8000/ws/chat
+```
+
+## 功能摘要
+
+- 串流回覆顯示（delta/done）
+- 心跳保活與自動重連
+- 對話結束與摘要事件處理
+- Markdown 與數學公式渲染
+- 基本使用者資料輸入（姓名/電話）
+
+## 常用指令
+
+```bash
+npm run dev
+npm run lint
+npm run build
+npm run preview
+```

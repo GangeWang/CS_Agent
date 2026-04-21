@@ -112,7 +112,7 @@ async def ws_chat(websocket: WebSocket) -> None:
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
         summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
-        '''await websocket.send_text(json_dumps({
+        await websocket.send_text(json_dumps({
             "type": "conversation_summary",
             "reason": reason,
             "summary": summary
@@ -120,7 +120,7 @@ async def ws_chat(websocket: WebSocket) -> None:
         await websocket.send_text(json_dumps({
             "type": "conversation_ended",
             "reason": reason
-        }))'''
+        }))
         await websocket.close(code=1000, reason="conversation ended")
 
     try:
@@ -172,7 +172,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                 break
 
             messages = payload.get("messages", [])
-            user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
+            user_msg = None
+            if isinstance(messages, list):
+                for m in reversed(messages):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        user_msg = m.get("content")
+                        break
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
