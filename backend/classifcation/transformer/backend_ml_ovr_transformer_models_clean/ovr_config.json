@@ -1,0 +1,18 @@
+{
+  "labels": [
+    "NORMAL",
+    "ABUSIVE",
+    "PROMPT_ATTACK",
+    "SPAM"
+  ],
+  "thresholds": {
+    "NORMAL": 0.3,
+    "ABUSIVE": 0.3,
+    "PROMPT_ATTACK": 0.3,
+    "SPAM": 0.3
+  },
+  "model_name": "bert-base-chinese",
+  "max_len": 256,
+  "model_dir": "backend_ml_ovr_transformer_models_clean",
+  "note": "Threshold selected on VAL only; TEST used once for final report."
+}

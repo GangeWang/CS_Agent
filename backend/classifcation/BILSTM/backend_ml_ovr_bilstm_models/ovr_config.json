@@ -1,0 +1,17 @@
+{
+  "labels": [
+    "NORMAL",
+    "ABUSIVE",
+    "PROMPT_ATTACK",
+    "SPAM"
+  ],
+  "thresholds": {
+    "NORMAL": 0.64,
+    "ABUSIVE": 0.3,
+    "PROMPT_ATTACK": 0.48,
+    "SPAM": 0.3
+  },
+  "max_len": 200,
+  "model_dir": "backend_ml_ovr_bilstm_models",
+  "note": "OvR BiLSTM binary models: label vs not_label; threshold selected on VAL only."
+}
