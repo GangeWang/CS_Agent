@@ -70,7 +70,7 @@ weighted avg     0.9965    0.9965    0.9965      1138
 ```
 
 ---
-## LR（多類）
+## TF-IDF + LR（多類）
 
 ```text
 === Classification Report ===
