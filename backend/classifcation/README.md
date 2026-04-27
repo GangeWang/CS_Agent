@@ -22,6 +22,7 @@ PROMPT_ATTACK     0.9565    0.8800    0.9167        25
 ## BiLSTM OvR
 
 ```text
+Training binary model: NORMAL vs NOT_NORMAL
 [NORMAL] threshold(from val) = 0.64
               precision    recall  f1-score   support
 
@@ -32,6 +33,7 @@ PROMPT_ATTACK     0.9565    0.8800    0.9167        25
    macro avg     0.9849    0.9849    0.9849      1138
 weighted avg     0.9947    0.9947    0.9947      1138
 
+Training binary model: ABUSIVE vs NOT_ABUSIVE
 [ABUSIVE] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
@@ -42,6 +44,8 @@ weighted avg     0.9947    0.9947    0.9947      1138
    macro avg     0.9835    0.9692    0.9762      1138
 weighted avg     0.9973    0.9974    0.9973      1138
 
+
+Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
 [PROMPT_ATTACK] threshold(from val) = 0.48
               precision    recall  f1-score   support
 
@@ -52,6 +56,8 @@ weighted avg     0.9973    0.9974    0.9973      1138
    macro avg     0.9808    0.9996    0.9900      1138
 weighted avg     0.9992    0.9991    0.9991      1138
 
+
+Training binary model: SPAM vs NOT_SPAM
 [SPAM] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
@@ -96,9 +102,6 @@ Training binary model: NORMAL vs NOT_NORMAL
    macro avg     0.9899    0.9899    0.9899      1138
 weighted avg     0.9965    0.9965    0.9965      1138
 
-saved => E:\CS_Agent\backend\backend_ml_ovr_models\normal_bin.joblib
-
-========================================================================
 Training binary model: ABUSIVE vs NOT_ABUSIVE
 [ABUSIVE] best threshold = 0.82
               precision    recall  f1-score   support
@@ -110,9 +113,6 @@ Training binary model: ABUSIVE vs NOT_ABUSIVE
    macro avg     0.9825    0.9541    0.9678      1138
 weighted avg     0.9964    0.9965    0.9964      1138
 
-saved => E:\CS_Agent\backend\backend_ml_ovr_models\abusive_bin.joblib
-
-========================================================================
 Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
 [PROMPT_ATTACK] best threshold = 0.66
               precision    recall  f1-score   support
@@ -124,9 +124,6 @@ Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
    macro avg     0.9996    0.9800    0.9896      1138
 weighted avg     0.9991    0.9991    0.9991      1138
 
-saved => E:\CS_Agent\backend\backend_ml_ovr_models\prompt_attack_bin.joblib
-
-========================================================================
 Training binary model: SPAM vs NOT_SPAM
 [SPAM] best threshold = 0.52
               precision    recall  f1-score   support
@@ -138,11 +135,6 @@ Training binary model: SPAM vs NOT_SPAM
    macro avg     0.9893    0.9803    0.9847      1138
 weighted avg     0.9973    0.9974    0.9974      1138
 
-saved => E:\CS_Agent\backend\backend_ml_ovr_models\spam_bin.joblib
-
-========================================================================
-Saved config => E:\CS_Agent\backend\backend_ml_ovr_models\ovr_config.json
-Thresholds: {'NORMAL': 0.32, 'ABUSIVE': 0.82, 'PROMPT_ATTACK': 0.66, 'SPAM': 0.52}
 ```
 
 ---
@@ -167,6 +159,7 @@ PROMPT_ATTACK     1.0000    0.9600    0.9796        25
 ## Transformer（OvR）
 
 ```text
+Training binary model: NORMAL vs NOT_NORMAL
 [NORMAL] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
@@ -177,6 +170,8 @@ PROMPT_ATTACK     1.0000    0.9600    0.9796        25
    macro avg     1.0000    1.0000    1.0000      1138
 weighted avg     1.0000    1.0000    1.0000      1138
 
+
+Training binary model: ABUSIVE vs NOT_ABUSIVE
 [ABUSIVE] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
@@ -187,6 +182,7 @@ weighted avg     1.0000    1.0000    1.0000      1138
    macro avg     0.9853    0.9995    0.9923      1138
 weighted avg     0.9991    0.9991    0.9991      1138
 
+Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
 [PROMPT_ATTACK] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
@@ -197,6 +193,7 @@ weighted avg     0.9991    0.9991    0.9991      1138
    macro avg     0.9996    0.9800    0.9896      1138
 weighted avg     0.9991    0.9991    0.9991      1138
 
+Training binary model: SPAM vs NOT_SPAM
 [SPAM] threshold(from val) = 0.3
               precision    recall  f1-score   support
 
