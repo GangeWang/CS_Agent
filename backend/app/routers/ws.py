@@ -7,7 +7,7 @@ import json
 import asyncio
 import logging
 import math
-from typing import Any, Dict, List
+from typing import Dict, List
 from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
@@ -19,8 +19,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
-IDLE_TIMEOUT_SECONDS = 180
-IDLE_WARNING_SECONDS_BEFORE_END = 60
+IDLE_TIMEOUT_SECONDS = 30
+IDLE_WARNING_SECONDS_BEFORE_END = 20
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -59,17 +59,6 @@ def _build_history_for_summary(history: List[Dict[str, str]]) -> str:
         elif role == "assistant":
             lines.append(f"客服助手：{content}")
     return "\n".join(lines)
-
-
-def _get_latest_user_message(messages: List[Dict[str, Any]]) -> str | None:
-    if not isinstance(messages, list):
-        return None
-    for item in reversed(messages):
-        if isinstance(item, dict) and item.get("role") == "user":
-            content = item.get("content")
-            if isinstance(content, str) and content:
-                return content
-    return None
 
 
 def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | None) -> str:
@@ -123,10 +112,11 @@ async def ws_chat(websocket: WebSocket) -> None:
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
         summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
+        print(summary)
         await websocket.send_text(json_dumps({
             "type": "conversation_summary",
             "reason": reason,
-            "summary": summary
+            "summary": "對話已關閉"
         }))
         await websocket.send_text(json_dumps({
             "type": "conversation_ended",
@@ -183,7 +173,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 break
 
             messages = payload.get("messages", [])
-            user_msg = _get_latest_user_message(messages)
+            user_msg = next((m.get("content") for m in messages if m.get("role") == "user"), None)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue

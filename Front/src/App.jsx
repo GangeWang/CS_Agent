@@ -272,7 +272,7 @@ export default function App() {
         if (!payload || typeof payload !== 'object') return
         if (payload.type === 'conversation_summary') {
             const summaryText = payload.summary || '本次對話摘要產生失敗。'
-            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: `### 對話摘要\n${summaryText}` }])
+            setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: `${summaryText}` }])
             return
         }
 
@@ -452,7 +452,7 @@ export default function App() {
         return (
             <div className="app profile-page">
                 <main className="profile-card">
-                    <h1>進入聊天前請先留資料</h1>
+                    <h1>請先留資料以獲得完整的服務</h1>
                     <form className="profile-form" onSubmit={submitProfile}>
                         <label className="profile-field">
                             姓名

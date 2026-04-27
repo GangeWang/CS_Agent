@@ -1,7 +1,7 @@
 """
 Guardrail text classification service.
 Three-stage pipeline: RULE -> SEMANTIC -> ML(OvR).
-Loads OvR binary models from backend_ml_ovr_models and provides inference API.
+Loads OvR binary models from semantic＿models and provides inference API.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # =============================
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
-MODEL_DIR = Path(__file__).resolve().parents[2] / "backend_ml_ovr_models"
+MODEL_DIR = Path(__file__).resolve().parents[2] / "semantic＿models"
 CONFIG_PATH = MODEL_DIR / "ovr_config.json"
 
 # Optional semantic resources (you can replace file names by your own)
@@ -40,7 +40,7 @@ ThresholdMap = Dict[str, float]
 # Whitelist & Rules
 # =============================
 WHITELIST_DOMAINS = {
-    "www.samsung.com",
+    "example.com",
 }
 
 PROMPT_ATTACK_RULES = [
