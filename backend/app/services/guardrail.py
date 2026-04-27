@@ -1,7 +1,7 @@
 """
-Guardrail text classification service.
+Guardrail text classification service (Transformer OvR).
 Three-stage pipeline: RULE -> SEMANTIC -> ML(OvR).
-Loads OvR binary models from semantic＿models and provides inference API.
+Loads OvR transformer binary models from semantic_models and provides inference API.
 """
 from __future__ import annotations
 
@@ -13,25 +13,66 @@ from collections import defaultdict
 import json
 import logging
 import re
+import os
 
-import joblib
 import numpy as np
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+# =============================
+# Device config (default CPU) -- change with env GUARDRAIL_DEVICE=cuda
+# =============================
+RequestedDevice = os.environ.get("GUARDRAIL_DEVICE", "cpu").lower()
+if RequestedDevice in ("cuda", "gpu") and torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
+
+torch.set_num_threads(int(os.environ.get("GUARDRAIL_CPU_THREADS", 4)))
+logger.info(f"guardrail: using DEVICE={DEVICE}, cpu_threads={torch.get_num_threads()}")
 
 # =============================
 # Labels / Paths / Types
 # =============================
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
-MODEL_DIR = Path(__file__).resolve().parents[2] / "semantic＿models"
-CONFIG_PATH = MODEL_DIR / "ovr_config.json"
+def _ensure_path(p):
+    return p if isinstance(p, Path) else Path(p)
 
-# Optional semantic resources (you can replace file names by your own)
-SEMANTIC_TEXTS_PATH = MODEL_DIR / "semantic_texts.joblib"       # List[str]
-SEMANTIC_LABELS_PATH = MODEL_DIR / "semantic_labels.joblib"     # List[str]
-SEMANTIC_EMB_PATH = MODEL_DIR / "semantic_embeddings.npy"       # np.ndarray shape=(N, D)
+# If you exported a custom model dir via env, prefer it
+_model_dir_env = os.environ.get("GUARDRAIL_MODEL_DIR", None)
+
+if _model_dir_env:
+    MODEL_DIR = Path(_model_dir_env)
+else:
+    # Use the path you gave: classifcation/transformer/backend_ml_ovr_transformer_models_clean
+    MODEL_DIR = Path(__file__).resolve().parents[2] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
+
+MODEL_DIR = _ensure_path(MODEL_DIR)
+
+# CONFIG_PATH should point to the ovr_config.json file inside MODEL_DIR.
+_config_env = os.environ.get("GUARDRAIL_CONFIG_PATH", None)
+if _config_env:
+    CONFIG_PATH = Path(_config_env)
+else:
+    CONFIG_PATH = MODEL_DIR / "ovr_config.json"
+
+CONFIG_PATH = _ensure_path(CONFIG_PATH)
+
+# Semantic artifact paths (normalized)
+SEMANTIC_TEXTS_PATH = _ensure_path(MODEL_DIR / "semantic_texts.joblib")
+SEMANTIC_LABELS_PATH = _ensure_path(MODEL_DIR / "semantic_labels.joblib")
+SEMANTIC_EMB_PATH = _ensure_path(MODEL_DIR / "semantic_embeddings.npy")
+
+# Debug log right after normalization (helps startup diagnostics)
+logger.info(f"guardrail: MODEL_DIR={MODEL_DIR!r} (exists={MODEL_DIR.exists()})")
+logger.info(f"guardrail: CONFIG_PATH={CONFIG_PATH!r} (exists={CONFIG_PATH.exists()})")
+logger.info(f"guardrail: SEMANTIC_TEXTS_PATH={SEMANTIC_TEXTS_PATH!r} (exists={SEMANTIC_TEXTS_PATH.exists()})")
+logger.info(f"guardrail: SEMANTIC_LABELS_PATH={SEMANTIC_LABELS_PATH!r} (exists={SEMANTIC_LABELS_PATH.exists()})")
+logger.info(f"guardrail: SEMANTIC_EMB_PATH={SEMANTIC_EMB_PATH!r} (exists={SEMANTIC_EMB_PATH.exists()})")
 
 ModelMap = Dict[str, Any]
 ThresholdMap = Dict[str, float]
@@ -69,7 +110,7 @@ SPAM_INTENT_PATTERNS = [
     r"私訊我",
     r"立即領獎|免費領獎|點我領",
     r"保證獲利|躺賺|日入",
-    r"成人|無碼|外流|AV片|自拍偷拍",
+    r"成人|無碼|外流|AV片|偷拍自拍",
     r"買粉|買讚|刷評價",
     r"博弈|代儲|代充",
 ]
@@ -144,63 +185,109 @@ def rule_first(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, fl
 
 
 # =============================
-# ML (OvR) stage
+# ML (OvR) stage - Transformer (CPU friendly)
 # =============================
-def _predict_ovr(
+def _predict_ovr_transformer(
     models: ModelMap,
+    tokenizers: Dict[str, Any],
     thresholds: ThresholdMap,
-    text: str
+    text: str,
+    device: torch.device,
+    max_len: int,
 ) -> Tuple[str, float, Dict[str, float], Dict[str, bool]]:
+    """
+    Run each transformer binary model and return:
+      - selected label (or 'UNCERTAIN')
+      - confidence (prob of selected or top)
+      - probs: map label -> pos-prob
+      - pass_flags: map label -> bool (pos-prob >= threshold)
+    """
     probs: Dict[str, float] = {}
     pass_flags: Dict[str, bool] = {}
 
+    # single example -> tokenize per model (tokenizer may differ by model type)
     for lb in LABELS:
-        prob_pos = float(models[lb].predict_proba([text])[0, 1])
+        tokenizer = tokenizers[lb]
+        model = models[lb]
+
+        enc = tokenizer(
+            text,
+            truncation=True,
+            max_length=max_len,
+            padding=True,
+            return_tensors="pt",
+        )
+        # Move tensors to desired device
+        enc = {k: v.to(device) for k, v in enc.items()}
+
+        # inference_mode is preferred on CPU for performance/low memory
+        with torch.inference_mode():
+            out = model(**enc)
+            logits = out.logits  # shape [1, num_labels] (num_labels==2)
+            probs_arr = torch.softmax(logits, dim=1).cpu().numpy()[0]
+            prob_pos = float(probs_arr[1])
+
         probs[lb] = prob_pos
-        pass_flags[lb] = prob_pos >= float(thresholds[lb])
+        pass_flags[lb] = prob_pos >= float(thresholds.get(lb, 0.5))
 
     passed = [lb for lb in LABELS if pass_flags[lb]]
     if passed:
         best = max(passed, key=lambda x: probs[x])
         return best, probs[best], probs, pass_flags
 
-    # none passed threshold
+    # none passed threshold -> return UNCERTAIN with highest prob
     best_any = max(LABELS, key=lambda x: probs[x])
     return "UNCERTAIN", probs[best_any], probs, pass_flags
 
 
 # =============================
-# Load resources
+# Load resources (Transformer models + semantic resources)
 # =============================
 @lru_cache(maxsize=1)
 def _load_guardrail_resources():
-    # 1) OVR config + models
-    if not CONFIG_PATH.exists():
-        raise FileNotFoundError(f"Config not found: {CONFIG_PATH}")
+    # 1) OVR config
+    cfg_path = Path(CONFIG_PATH)
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Config not found: {cfg_path}")
 
-    cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     thresholds: ThresholdMap = cfg["thresholds"]
+    max_len = int(cfg.get("max_len", 256))
+    embedding_model_name = cfg.get("embedding_model_name", "paraphrase-multilingual-MiniLM-L12-v2")
+    semantic_topk = int(cfg.get("semantic_topk", 5))
 
+    # 2) Load transformer models + tokenizers per label
+    device = DEVICE  # use global DEVICE (CPU by default)
     models: ModelMap = {}
-    for lb in LABELS:
-        p = MODEL_DIR / f"{lb.lower()}_bin.joblib"
-        if not p.exists():
-            raise FileNotFoundError(f"Model missing: {p}")
-        models[lb] = joblib.load(p)
+    tokenizers: Dict[str, Any] = {}
 
-    # 2) Semantic artifacts (optional but expected for stage-2)
-    # If missing, semantic stage will be skipped gracefully.
+    for lb in LABELS:
+        subdir = MODEL_DIR / lb.lower()
+        if not subdir.exists():
+            raise FileNotFoundError(f"Model folder missing: {subdir}")
+        tokenizer = AutoTokenizer.from_pretrained(str(subdir))
+        # low_cpu_mem_usage reduces peak usage during load (requires newer transformers)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            str(subdir),
+            low_cpu_mem_usage=True,
+        )
+        # Move model to chosen device (CPU)
+        model.to(device)
+        model.eval()
+        tokenizers[lb] = tokenizer
+        models[lb] = model
+        logger.info(f"guardrail: loaded {lb} model to {device}")
+
+    # 3) Semantic artifacts (optional)
     embedder = None
     corpus_texts: List[str] = []
     corpus_labels: List[str] = []
     corpus_emb: Optional[np.ndarray] = None
-    semantic_topk = int(cfg.get("semantic_topk", 5))
-    embedding_model_name = cfg.get("embedding_model_name", "paraphrase-multilingual-MiniLM-L12-v2")
-
     try:
         if SEMANTIC_TEXTS_PATH.exists() and SEMANTIC_LABELS_PATH.exists() and SEMANTIC_EMB_PATH.exists():
-            corpus_texts = joblib.load(SEMANTIC_TEXTS_PATH)
-            corpus_labels = joblib.load(SEMANTIC_LABELS_PATH)
+            import joblib as _joblib  # local import to avoid heavy dependency if unused
+            corpus_texts = _joblib.load(SEMANTIC_TEXTS_PATH)
+            corpus_labels = _joblib.load(SEMANTIC_LABELS_PATH)
             corpus_emb = np.load(SEMANTIC_EMB_PATH)
             embedder = SentenceTransformer(embedding_model_name)
 
@@ -221,13 +308,16 @@ def _load_guardrail_resources():
 
     return {
         "models": models,
+        "tokenizers": tokenizers,
         "thresholds": thresholds,
+        "max_len": max_len,
         "embedder": embedder,
         "corpus_texts": corpus_texts,
         "corpus_labels": corpus_labels,
         "corpus_emb": corpus_emb,
         "semantic_topk": semantic_topk,
         "whitelist_domains": whitelist,
+        "device": device,
     }
 
 
@@ -267,19 +357,22 @@ def classify_text(text: str) -> dict:
     Three-stage classify:
     1) RULE
     2) SEMANTIC (if resources available)
-    3) ML OVR
+    3) ML OVR (transformer)
     Fallback-safe NORMAL only when whole service unavailable.
     """
     try:
         rs = _load_guardrail_resources()
         models = rs["models"]
+        tokenizers = rs["tokenizers"]
         thresholds = rs["thresholds"]
+        max_len = rs["max_len"]
         embedder = rs["embedder"]
         corpus_texts = rs["corpus_texts"]
         corpus_labels = rs["corpus_labels"]
         corpus_emb = rs["corpus_emb"]
         semantic_topk = rs["semantic_topk"]
         whitelist_domains = rs["whitelist_domains"]
+        device = rs["device"]
 
         # Stage 1: RULE
         rr = rule_first(text, whitelist_domains)
@@ -322,8 +415,15 @@ def classify_text(text: str) -> dict:
                     "available": True,
                 }
 
-        # Stage 3: ML (OvR)
-        ml_label, ml_conf, probs, flags = _predict_ovr(models, thresholds, text)
+        # Stage 3: ML (OvR Transformer)
+        ml_label, ml_conf, probs, flags = _predict_ovr_transformer(
+            models=models,
+            tokenizers=tokenizers,
+            thresholds=thresholds,
+            text=text,
+            device=device,
+            max_len=max_len,
+        )
 
         if ml_label != "UNCERTAIN":
             return {

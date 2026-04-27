@@ -19,8 +19,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
-IDLE_TIMEOUT_SECONDS = 30
-IDLE_WARNING_SECONDS_BEFORE_END = 20
+IDLE_TIMEOUT_SECONDS = 180
+IDLE_WARNING_SECONDS_BEFORE_END = 60
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -33,6 +33,7 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
 
 
 def _build_guardrail_instruction(label: str) -> str:
+    print(label)
     if label == "ABUSIVE":
         return (
             "你是客服助理。使用者情緒可能較激動，請先簡短同理與降溫，"

@@ -8,7 +8,7 @@ LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
 # 你的原始資料檔（每行: 句子,標籤）
 RAW_PATH = Path("classifcation/backend_ml_data_guardrail_augmented_big.csv")
-MODEL_DIR = Path("semantic＿models")
+MODEL_DIR = Path("semantic_models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # 讀取兩欄: text,label
