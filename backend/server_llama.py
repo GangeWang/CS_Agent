@@ -149,17 +149,32 @@ def _looks_like_system_echo(text: str, system_prompt: Optional[str], snippet_len
     return txt_norm.startswith(sp_snip) or (sp_snip in txt_norm)
 
 # Flexible invoker: try messages-first, then various prompt/key combos, positional, etc.
-def _invoke_func_with_fallback(func, prompt: str, max_tokens: int, stream: bool = True, system_prompt: Optional[str] = None):
+def _invoke_func_with_fallback(
+    func,
+    prompt: str,
+    max_tokens: int,
+    stream: bool = True,
+    system_prompt: Optional[str] = None,
+    messages: Optional[list[dict]] = None,
+):
     last_exc = None
 
     # messages-first attempt (preferred for chat-template GGUF)
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-
+    effective_messages = []
+    if isinstance(messages, list) and messages:
+        has_system_role = any(
+            isinstance(m, dict) and m.get("role") == "system"
+            for m in messages
+        )
+        if system_prompt and not has_system_role:
+            effective_messages.append({"role": "system", "content": system_prompt})
+        effective_messages.extend(messages)
+    else:
+        if system_prompt:
+            effective_messages.append({"role": "system", "content": system_prompt})
+        effective_messages.append({"role": "user", "content": prompt})
     try:
-        return func(messages=messages, max_tokens=max_tokens, stream=stream)
+        return func(messages=effective_messages, max_tokens=max_tokens, stream=stream)
     except TypeError as e:
         last_exc = e
     except Exception:
@@ -200,7 +215,13 @@ def _invoke_func_with_fallback(func, prompt: str, max_tokens: int, stream: bool 
 
     raise last_exc or RuntimeError("Failed to invoke model function")
 
-def model_stream_generator(llm_client, prompt: str, max_tokens: int = 256, system_prompt: Optional[str] = None) -> Iterator[Any]:
+def model_stream_generator(
+    llm_client,
+    prompt: str,
+    max_tokens: int = 256,
+    system_prompt: Optional[str] = None,
+    messages: Optional[list[dict]] = None,
+) -> Iterator[Any]:
     if llm_client is None:
         raise RuntimeError("Llama client not initialized")
 
@@ -219,7 +240,14 @@ def model_stream_generator(llm_client, prompt: str, max_tokens: int = 256, syste
     last_exc = None
     for func in candidates:
         try:
-            res = _invoke_func_with_fallback(func, prompt, max_tokens, stream=True, system_prompt=system_prompt)
+            res = _invoke_func_with_fallback(
+                func,
+                prompt,
+                max_tokens,
+                stream=True,
+                system_prompt=system_prompt,
+                messages=messages,
+            )
             if hasattr(res, "__iter__") and not isinstance(res, (str, bytes, dict)):
                 for chunk in res:
                     yield chunk
@@ -234,12 +262,26 @@ def model_stream_generator(llm_client, prompt: str, max_tokens: int = 256, syste
 
     raise AttributeError("Model client has no supported streaming API (create_chat_completion/create/generate/callable): last error: " + str(last_exc))
 
-def model_generate_once(llm_client, prompt: str, max_tokens: int = 256, system_prompt: Optional[str] = None) -> str:
+def model_generate_once(
+    llm_client,
+    prompt: str,
+    max_tokens: int = 256,
+    system_prompt: Optional[str] = None,
+    messages: Optional[list[dict]] = None,
+) -> str:
     if llm_client is None:
         raise RuntimeError("Llama client not initialized")
 
     preferred = llm_client.create_chat_completion if hasattr(llm_client, "create_chat_completion") else (llm_client.create_completion if hasattr(llm_client, "create_completion") else (llm_client.create if hasattr(llm_client, "create") else (llm_client.generate if hasattr(llm_client, "generate") else llm_client)))
-    res = _invoke_func_with_fallback(preferred, prompt, max_tokens, stream=False, system_prompt=system_prompt)
+    res = _invoke_func_with_fallback(
+        preferred,
+        prompt,
+        max_tokens,
+        stream=False,
+        system_prompt=system_prompt,
+        messages=messages,
+    )
+
 
     # merge iterable results
     if hasattr(res, "__iter__") and not isinstance(res, (str, bytes, dict)):
@@ -316,6 +358,7 @@ async def generate(request: Request, auth=Depends(verify_api_key)):
     data = await request.json()
     max_tokens = int(data.get("max_tokens", 256))
     system_prompt = data.get("system_prompt")
+    msgs = None
     if "messages" in data:
         msgs = data["messages"]
         # find user content (simple behavior): take last user role content if present
@@ -332,7 +375,13 @@ async def generate(request: Request, auth=Depends(verify_api_key)):
 
     def blocking():
         try:
-            return model_generate_once(llm, prompt=prompt, max_tokens=max_tokens, system_prompt=system_prompt)
+            return model_generate_once(
+                llm,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                system_prompt=system_prompt,
+                messages=msgs,
+            )
         except Exception as e:
             logger.exception("generate failed: %s", e)
             raise
@@ -345,6 +394,7 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
     data = await request.json()
     max_tokens = int(data.get("max_tokens", 256))
     system_prompt = data.get("system_prompt")
+    msgs = None
     if "messages" in data:
         msgs = data["messages"]
         prompt = ""
@@ -363,7 +413,13 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
         def blocking_stream():
 
             try:
-                for chunk in model_stream_generator(llm, prompt=prompt, max_tokens=max_tokens, system_prompt=system_prompt):
+                for chunk in model_stream_generator(
+                        llm,
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        system_prompt=system_prompt,
+                        messages=msgs,
+                ):
                     txt = _extract_text_from_chunk(chunk, system_prompt=system_prompt)
                     if txt:
                         clean = _sanitize_model_output(txt)
@@ -374,7 +430,13 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
             except AttributeError as ae:
                 logger.info("No streaming API; fallback to single generate: %s", ae)
                 try:
-                    txt = model_generate_once(llm, prompt=prompt, max_tokens=max_tokens, system_prompt=system_prompt)
+                    txt = model_generate_once(
+                        llm,
+                        prompt=prompt,
+                        max_tokens=max_tokens,
+                        system_prompt=system_prompt,
+                        messages=msgs,
+                    )
                     cleaned = _sanitize_model_output(txt)
                     if cleaned and not _looks_like_system_echo(cleaned, system_prompt):
                         loop.call_soon_threadsafe(queue.put_nowait, json.dumps({"text": cleaned}, ensure_ascii=False))
