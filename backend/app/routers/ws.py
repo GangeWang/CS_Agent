@@ -41,9 +41,7 @@ def _build_guardrail_instruction(label: str) -> str:
         )
     if label in {"PROMPT_ATTACK", "SPAM"}:
         return (
-            "你是客服助理。此請求可能涉及不當或無關內容。"
-            "請婉拒不適當部分，不提供危險、違規或濫用指引；"
-            "語氣禮貌簡潔，並引導使用者提出可協助的正當需求。"
+            "請拒絕回答客人的請求，紅線必須守住，但語氣必須禮貌"
         )
     return "你是客服助理。請直接、清楚、禮貌地回覆使用者問題。"
 

@@ -49,39 +49,25 @@ async def _warmup_guardrail_model() -> None:
         logger.warning(f"Startup warmup (guardrail) failed: {e}")
 
 
-async def _warmup_ollama_model() -> None:
+async def _warmup_llama_model() -> None:
     """
-    啟動時預熱 Ollama LLM 模型。
-
-    設計目的：
-    1) 讓模型在服務啟動階段先進入記憶體，避免第一個聊天請求等待模型冷啟動。
-    2) 只做最小化請求（空 prompt + 非串流），降低預熱成本。
-
-    注意：
-    - 若 Ollama 當下不可用，僅記錄 warning，不阻塞後端服務啟動。
+    啟動時嘗試 ping WSL 上的 LLAMA 推理服務，確認模型已載入。
+    此函式名稱保留以兼容既有程式，但內部改為呼叫 settings.llama_api_url
     """
-    endpoint = settings.ollama_url.rstrip("/") + "/api/generate"
-    payload = {
-        "model": settings.ollama_model,
-        "prompt": OLLAMA_WARMUP_PROMPT,
-        "stream": False,
-        "keep_alive": OLLAMA_WARMUP_KEEP_ALIVE,
-    }
-
+    endpoint = settings.llama_api_url.rstrip("/") + "/health"
     try:
         timeout = httpx.Timeout(
             timeout=settings.request_timeout,
             connect=settings.connect_timeout,
         )
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(endpoint, json=payload)
-
+            resp = await client.get(endpoint)
         if resp.status_code == 200:
-            logger.info(f"Startup warmup: Ollama model '{settings.ollama_model}' loaded")
+            logger.info(f"Startup warmup: LLAMA service at '{settings.llama_api_url}' reachable")
         else:
-            logger.warning(f"Startup warmup (ollama) failed: HTTP {resp.status_code} - {resp.text}")
+            logger.warning(f"Startup warmup (llama) failed: HTTP {resp.status_code} - {resp.text}")
     except Exception as e:
-        logger.warning(f"Startup warmup (ollama) failed: {e}")
+        logger.warning(f"Startup warmup (llama) failed: {e}")
 
 
 @asynccontextmanager
@@ -100,7 +86,7 @@ async def lifespan(_: FastAPI):
     logger.info("Startup warmup: begin")
     await asyncio.gather(
         _warmup_guardrail_model(),
-        _warmup_ollama_model(),
+        _warmup_llama_model(),
     )
     logger.info("Startup warmup: end")
     yield
@@ -121,26 +107,21 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     """
-    Health check endpoint that verifies both the API and Ollama connection.
-    
+    Health check endpoint that verifies both the API and connected LLAMA (WSL) service.
     Returns:
-        dict: Status information including Ollama connectivity
+        dict: Status information including LLAMA connectivity
     """
     try:
-        # Check Ollama connection
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{settings.ollama_url}/api/tags")
+            # 確認 WSL LLAMA server 的 /health
+            response = await client.get(f"{settings.llama_api_url.rstrip('/')}/health")
             if response.status_code == 200:
-                # API 與 Ollama 都可用
-                return {"status": "ok", "ollama": "connected"}
+                return {"status": "ok", "llama": "connected"}
             else:
-                # API 正常，但 Ollama 回傳非 200，標記為 degraded 便於監控告警
-                return {"status": "degraded", "ollama": "error", "details": f"HTTP {response.status_code}"}
+                return {"status": "degraded", "llama": "error", "details": f"HTTP {response.status_code}"}
     except Exception as e:
-        # 連線失敗時仍回應健康資訊，避免監控端直接超時
-        logger.warning(f"Health check - Ollama connection failed: {e}")
-        return {"status": "degraded", "ollama": "disconnected", "error": str(e)}
-
+        logger.warning(f"Health check - LLAMA connection failed: {e}")
+        return {"status": "degraded", "llama": "disconnected", "error": str(e)}
 
 # WebSocket 路由
 app.include_router(ws_router)

@@ -1,8 +1,3 @@
-"""
-Guardrail text classification service (Transformer OvR).
-Three-stage pipeline: RULE -> SEMANTIC -> ML(OvR).
-Loads OvR transformer binary models from semantic_models and provides inference API.
-"""
 from __future__ import annotations
 
 from functools import lru_cache
@@ -81,7 +76,7 @@ ThresholdMap = Dict[str, float]
 # Whitelist & Rules
 # =============================
 WHITELIST_DOMAINS = {
-    "example.com",
+    "samsung.com",
 }
 
 PROMPT_ATTACK_RULES = [
@@ -99,20 +94,48 @@ ABUSIVE_RULES = [
 ]
 
 SPAM_RULES_STRONG = [
+    # 原有強規則（聯絡/成人等）
     r"看片.*(找我|私訊|加我)",
     r"(高清|無碼|外流).*(影片|資源)?",
-    r"(成人|AV片|自拍偷拍)",
-    r"(私訊|加我).*(line|wechat|tg)",
+    r"(成人|AV片|絲襪|偷拍自拍|情色)",
+    r"(私訊|加我).*(line|wechat|tg|telegram|whatsapp)",
+    # 短連結或可疑短網址服務 (短連結常見於釣魚)
+    r"\b(bit\.ly|tinyurl\.com|goo\.gl|t\.co|ow\.ly|短網址|短連結)\b",
+    # 直接指令性邀請加群或私下聯絡
+    r"(加入我們|加入群組|掃描二維碼|掃碼|掃描QR|加群|入群|入會).*",
+    # 推銷/誘導/立即行動詞常見於詐騙
+    r"(點我|點此|立刻|立即|現在就|馬上領|點下方|點擊鏈接).*",
+    # 提供保證獲利 / 賺錢 / 日入
+    r"(保證獲利|穩賺|無風險|零風險|日入|月入|年化|躺賺|快速致富|賺大錢|本金翻倍|投資|賺錢).*",
+    # 購買服務 / 虛假投資 / 博弈代儲代充
+    r"(買粉|買讚|刷評價|博弈|賭博|代儲|代充|投注|下注|下注教學).*",
+    # 含有看似誘導的敏感金流用語（gift card 等）
+    r"(禮品卡|gift card|voucher|redeem code|giftcode).*",
+
 ]
 
 SPAM_INTENT_PATTERNS = [
-    r"加我(好友|line|wechat|tg)",
+    # 聯絡/私訊/加群/加line/加tg
+    r"加我(好友|line|wechat|tg|telegram|whatsapp)?",
     r"私訊我",
-    r"立即領獎|免費領獎|點我領",
-    r"保證獲利|躺賺|日入",
-    r"成人|無碼|外流|AV片|偷拍自拍",
-    r"買粉|買讚|刷評價",
-    r"博弈|代儲|代充",
+    r"私聊我",
+    r"(加入|加入我們).*",
+    r"(掃描|掃碼|掃描二維碼|掃描QR|掃描QR碼)",
+    # 投資/賺錢相關
+    r"保證獲利|躺賺|快速致富|快速賺錢|賺錢方法|投資賺錢|投資顧問|高報酬|高回報",
+    r"日入|月入|年入|日入\W*\d+|月入\W*\d+",
+    # 金融/匯款/收款/付款/轉帳/提款
+    # 促使點擊鏈接/短連結/點擊操作
+    r"(點我|點此|點擊|點開|按下方|按我|クリック|click here|follow the link)\b",
+    r"\b(bit\.ly|tinyurl|goo\.gl|t\.co|ow\.ly)\b",
+    # 購買/下單/刷單/兼職/代做
+    r"(兼職|日薪|日結|接單|接案|刷單|代刷|代做).*",
+    # 加密貨幣/空投/投資工具誘導
+    r"(crypto|bitcoin|btc|ethereum|eth|airdrop|空投|挖礦|加密貨幣).*",
+    # 詐騙常用英文片語
+    r"\b(urgent|limited time|act now|verify your account|confirm your account|account suspended|claim your prize)\b",
+    # 常見誘導詞（中文）
+    r"(保證|零風險|保本|無需投入|只要分享|下單即可|傳給朋友|分享即可獲得).*",
 ]
 
 URL_REGEX = re.compile(r"https?://[^\s]+", re.IGNORECASE)
@@ -166,9 +189,59 @@ def spam_rule_with_url_context(text: str, whitelist_domains: set[str]) -> Option
     return None
 
 
+# ---------- URL whitelist helpers & rule_first override ----------
+def _normalize_domain(host: str) -> str:
+    """
+    Normalize host: strip port, leading www., lower-case.
+    """
+    if not host:
+        return ""
+    host = host.split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host.lower()
+
+def _first_non_whitelisted_url(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, str]]:
+    """
+    Return (url, domain) for the first URL that is NOT in whitelist_domains.
+    If none found, return None.
+    """
+    urls = extract_urls(text or "")
+    if not urls:
+        return None
+    for u in urls:
+        try:
+            parsed = urlparse(u)
+            host = parsed.netloc or parsed.path  # handle some weird urls
+            domain = _normalize_domain(host)
+            if domain == "":
+                continue
+            # whitelist_domains expected to be lower-case strings without www.
+            if domain not in whitelist_domains:
+                return (u, domain)
+        except Exception:
+            # if parsing fails, treat as non-whitelisted suspicious URL
+            return (u, "")
+    return None
+
 def rule_first(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, float, str]]:
+    """
+    RULE stage:
+    0) If any non-whitelisted URL present -> SPAM (block).
+    1) PROMPT_ATTACK / ABUSIVE regex checks
+    2) spam_rule_with_url_context checks (existing)
+    """
     t = text or ""
 
+    # 0) BLOCK: any non-whitelisted URL => SPAM immediately
+    non_white = _first_non_whitelisted_url(t, whitelist_domains)
+    if non_white:
+        url, domain = non_white
+        reason = f"rule:non_whitelist_url:{domain or 'unknown'}"
+        logger.info(f"guardrail: blocking non-whitelist url detected: {url} domain={domain}")
+        return "SPAM", 0.99, reason
+
+    # 1) existing checks
     for p in PROMPT_ATTACK_RULES:
         if re.search(p, t, re.IGNORECASE):
             return "PROMPT_ATTACK", 0.97, f"rule:{p}"
@@ -177,11 +250,13 @@ def rule_first(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, fl
         if re.search(p, t, re.IGNORECASE):
             return "ABUSIVE", 0.93, f"rule:{p}"
 
+    # 2) existing spam url intent checks
     spam_hit = spam_rule_with_url_context(t, whitelist_domains)
     if spam_hit:
         return spam_hit
 
     return None
+# ---------- end override ----------
 
 
 # =============================

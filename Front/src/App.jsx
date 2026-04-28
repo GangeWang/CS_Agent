@@ -378,7 +378,7 @@ export default function App() {
         try {
             const ws = wsRef.current
             const payload = {
-                model: 'gpt-oss:20b',
+                model: 'CS_AgentV12',
                 messages: [{ role: 'user', content: trimmed }],
                 user_info: userProfile
             }
