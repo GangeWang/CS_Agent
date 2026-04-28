@@ -1,63 +1,67 @@
 # CS_Agent Frontend
 
-React + Vite 前端，提供客服聊天 UI，透過 WebSocket 與 backend 串流互動。
+本目錄為 React + Vite 前端，提供客服聊天 UI，透過 WebSocket 與後端進行即時串流互動。
 
-## 環境需求
+---
 
-- Node.js 18+（建議 20+）
-- npm 9+
-- backend 已啟動且可連線 `ws://<host>:8000/ws/chat`
-
-## 技術棧
+## 技術堆疊
 
 - React 19
-- Vite（rolldown-vite）
-- react-markdown + remark/rehype
-- KaTeX + highlight.js
-- DOMPurify + rehype-sanitize
+- Vite
+- react-markdown + remark-gfm + remark-math
+- rehype-katex + rehype-sanitize
+- DOMPurify
 
-## 安裝
+---
+
+## 安裝與執行
 
 ```bash
 cd Front
 npm ci
+npm run dev
 ```
 
-## 開發與建置
+其他常用指令：
 
 ```bash
-npm run dev
 npm run lint
 npm run build
 npm run preview
 ```
 
-## WebSocket 設定
+---
 
-預設連線位址：
+## WebSocket 連線設定
 
-```text
-ws://<目前網頁主機>:8000/ws/chat
-```
+預設連線規則：
+
+- 使用當前頁面 host
+- 預設 port 為 `8000`
+- path 為 `/ws/chat`
 
 可用環境變數覆蓋：
 
 ```bash
 VITE_WS_URL=ws://your-host:8000/ws/chat
-# 或只覆蓋連線埠
+# 或只覆蓋 port
 VITE_WS_PORT=8000
 ```
 
-## 主要行為
+---
 
-- 串流回覆渲染（`delta` / `done`）
-- `ping/pong` 心跳維持連線
-- 支援 `idle_warning`、`conversation_summary`、`conversation_ended` 事件
-- Markdown / 數學公式 / 程式碼區塊高亮渲染
-- 使用者基本資料輸入（姓名、電話）
+## 前端功能摘要
 
-## 疑難排解
+- 串流接收 `delta`，以 buffer + flush 方式降低高頻重繪
+- 支援 `ping/pong` 心跳與斷線重連（exponential backoff）
+- 顯示 `idle_warning`、`conversation_summary`、`conversation_ended`
+- Markdown、數學公式、程式碼內容渲染
+- 輸入與渲染雙層內容清理（DOMPurify + rehype-sanitize）
 
-- 畫面無回覆：先檢查 backend 是否啟動於 `8000` 並可接收 `/ws/chat`
-- 連線失敗：確認 `VITE_WS_URL` / `VITE_WS_PORT` 是否設定正確
-- 建置警告 chunk 過大：屬於目前打包現況，不影響基本功能
+---
+
+## 開發注意
+
+- 後端事件型別若變更，需同步調整 `src/App.jsx` 的 `handleWsPayload`。
+- 若要優化首屏體驗，可考慮將初始歡迎訊息與個資表單拆分成獨立元件。
+- lint/build 需在 Node.js 18+ 環境下執行。
