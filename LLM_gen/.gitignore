@@ -1,0 +1,15 @@
+# LLM models
+*.gguf
+*.bin
+*.safetensors
+
+# python
+__pycache__/
+*.pyc
+
+# venv
+.venv/
+env/
+
+# logs
+*.log
