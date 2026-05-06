@@ -7,7 +7,7 @@
 - 串流呼叫 LLM 推理服務
 - 健康檢查（`/health`）與啟動預熱
 
-> 本文件不覆蓋 `backend/classifcation/` 的細節。
+> 本文件不覆蓋 `backend/classifcation/` 的訓練資料與模型細節。
 
 ---
 
@@ -15,32 +15,46 @@
 
 ```text
 backend/
-├── app/
+├── api/                     # HTTP / WebSocket entry
 │   ├── main.py              # FastAPI app、lifespan、/health
-│   ├── config.py            # 環境變數設定（Pydantic Settings）
-│   ├── routers/ws.py        # WebSocket 主流程與對話狀態
-│   └── services/
-│       ├── guardrail.py     # 文字分類
-│       └── streamer.py      # LLM 串流請求
+│   └── ws.py                # WebSocket route entry
+├── orchestrator/            # 主控制層
+│   ├── planner.py           # guardrail label -> system instruction
+│   ├── executor.py          # WebSocket 對話流程
+│   ├── context.py           # payload/history context helpers
+│   └── state.py             # orchestration constants
+├── tools/                   # Tool facade layer
+│   ├── memory.py            # in-process conversation memory
+│   ├── llm.py               # LLM streaming facade
+│   ├── safety.py            # guardrail facade
+│   └── summarize.py         # conversation summary tool
+├── services/
+│   └── llama_client.py      # LLAMA service HTTP client
+├── memory/
+│   ├── postgres.py          # persistent memory boundary
+│   └── models.py            # memory data models
+├── guard/
+│   └── policy.py            # guardrail classification policy
 ├── classifcation/           # 分類資料/訓練相關（另行維護）
-├── requirements.txt
-└── .env.example
+├── config.py                # 環境變數設定（Pydantic Settings）
+└── requirements.txt
 ```
 
 ---
 
 ## 安裝與啟動
 
+請從專案根目錄啟動，讓 `backend.*` 套件匯入路徑保持一致：
+
 ```bash
-cd backend
-python3 -m pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m pip install -r backend/requirements.txt
+uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 正式環境範例：
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 ---
@@ -50,7 +64,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 1. 複製環境檔：
 
 ```bash
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
 2. 依部署環境調整：
@@ -61,7 +75,7 @@ cp .env.example .env
 - `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
 - `CORS_ORIGINS`：允許前端來源
 
-> 實際預設值以 `app/config.py` 為準。
+> 實際預設值以 `backend/config.py` 為準。
 
 ---
 
@@ -103,6 +117,7 @@ cp .env.example .env
 
 ## 開發建議
 
-- 請先閱讀 `CODE_REVIEW_2026-04-28.md` 再進行重構。
-- 若要延伸訊息協定，請同步更新前端 `Front/src/App.jsx` 的 payload handler。
-- 若要上線，建議加入：結構化 logging、速率限制、整合測試。
+- `backend/api/` 僅放 HTTP/WebSocket entry，避免把商業流程塞在 router。
+- 主要對話流程集中在 `backend/orchestrator/executor.py`。
+- 新工具請放在 `backend/tools/`，外部服務 client 請放在 `backend/services/`。
+- 若要延伸訊息協定，請同步更新前端 `frontend/src/App.jsx` 的 payload handler。

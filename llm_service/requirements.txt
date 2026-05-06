@@ -1,0 +1,7 @@
+# FastAPI server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# llama.cpp Python binding
+llama-cpp-python>=0.2.0

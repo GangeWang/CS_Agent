@@ -44,7 +44,7 @@ if _model_dir_env:
     MODEL_DIR = Path(_model_dir_env)
 else:
     # Use the path you gave: classifcation/transformer/backend_ml_ovr_transformer_models_clean
-    MODEL_DIR = Path(__file__).resolve().parents[2] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
+    MODEL_DIR = Path(__file__).resolve().parents[1] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
 
 MODEL_DIR = _ensure_path(MODEL_DIR)
 

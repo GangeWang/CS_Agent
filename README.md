@@ -13,16 +13,31 @@ CS_Agent 是一個以 **FastAPI（後端）+ React/Vite（前端）** 建置的�
 
 ```text
 CS_Agent/
-├── backend/                 # FastAPI + WebSocket + Guardrail + LLM 串流
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── routers/ws.py
-│   │   └── services/
-│   ├── classifcation/       # 分類模型相關（本 README 不展開）
+├── backend/
+│   ├── api/                # HTTP / WebSocket entry
+│   ├── orchestrator/       # 主控制層
+│   │   ├── planner.py
+│   │   ├── executor.py
+│   │   ├── context.py
+│   │   └── state.py
+│   ├── tools/              # tool facade layer
+│   │   ├── memory.py
+│   │   ├── llm.py
+│   │   ├── safety.py
+│   │   └── summarize.py
+│   ├── services/
+│   │   └── llama_client.py
+│   ├── memory/
+│   │   ├── postgres.py
+│   │   └── models.py
+│   ├── guard/
+│   │   └── policy.py
+│   ├── classifcation/      # 分類模型相關（本 README 不展開）
 │   └── README.md
-├── Front/                   # React + Vite 聊天前端
+├── llm_service/            # LLAMA / llama.cpp-compatible server
+├── frontend/               # React + Vite 聊天前端
 │   └── README.md
+├── database/               # database assets / migrations
 └── README.md
 ```
 
@@ -32,16 +47,17 @@ CS_Agent/
 
 ### 1) 啟動後端
 
+請從專案根目錄啟動，讓 `backend.*` 套件匯入路徑保持一致：
+
 ```bash
-cd backend
-python3 -m pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python3 -m pip install -r backend/requirements.txt
+uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 2) 啟動前端
 
 ```bash
-cd Front
+cd frontend
 npm ci
 npm run dev
 ```
@@ -59,14 +75,14 @@ ws://<目前網頁主機>:8000/ws/chat
 - Python 3.10+
 - Node.js 18+（建議 20+）
 - npm 9+
-- 可連線的 LLM 推理服務（依 `backend/app/config.py` 設定）
+- 可連線的 LLM 推理服務（依 `backend/config.py` 設定）
 
 ---
 
 ## 文件導覽
 
 - 後端說明：`backend/README.md`
-- 前端說明：`Front/README.md`
+- 前端說明：`frontend/README.md`
 - 本次程式審查：`CODE_REVIEW_2026-04-28.md`
 
 ---
@@ -74,4 +90,5 @@ ws://<目前網頁主機>:8000/ws/chat
 ## 注意事項
 
 - `backend/classifcation/` 為獨立分類資料與模型目錄，請依該目錄內文件與流程管理。
+- `llm_service/` 放置推理服務入口，後端透過 `LLAMA_API_URL` 呼叫該服務。
 - 正式環境請務必設定 `.env`，不要使用預設 URL / timeout 直接上線。

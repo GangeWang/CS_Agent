@@ -2,6 +2,8 @@
 Configuration management for CS_Agent backend.
 Uses Pydantic Settings for environment-based configuration.
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 
@@ -37,7 +39,7 @@ class Settings(BaseSettings):
 
     class Config:
         # 自動從 backend/.env 載入設定，未提供時使用上方預設值
-        env_file = ".env"
+        env_file = Path(__file__).resolve().parent / ".env"
         env_file_encoding = "utf-8"
 
 

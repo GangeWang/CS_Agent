@@ -17,7 +17,7 @@
 ## 安裝與執行
 
 ```bash
-cd Front
+cd frontend
 npm ci
 npm run dev
 ```
