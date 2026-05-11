@@ -12,6 +12,7 @@ import os
 
 import numpy as np
 import torch
+from sentence_transformers.util import semantic_search
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
 
@@ -47,6 +48,7 @@ else:
     MODEL_DIR = Path(__file__).resolve().parents[2] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
 
 MODEL_DIR = _ensure_path(MODEL_DIR)
+semantic_path = Path("semantic_models")
 
 # CONFIG_PATH should point to the ovr_config.json file inside MODEL_DIR.
 _config_env = os.environ.get("GUARDRAIL_CONFIG_PATH", None)
@@ -58,9 +60,9 @@ else:
 CONFIG_PATH = _ensure_path(CONFIG_PATH)
 
 # Semantic artifact paths (normalized)
-SEMANTIC_TEXTS_PATH = _ensure_path(MODEL_DIR / "semantic_texts.joblib")
-SEMANTIC_LABELS_PATH = _ensure_path(MODEL_DIR / "semantic_labels.joblib")
-SEMANTIC_EMB_PATH = _ensure_path(MODEL_DIR / "semantic_embeddings.npy")
+SEMANTIC_TEXTS_PATH = _ensure_path(semantic_path / "semantic_texts.joblib")
+SEMANTIC_LABELS_PATH = _ensure_path(semantic_path / "semantic_labels.joblib")
+SEMANTIC_EMB_PATH = _ensure_path(semantic_path / "semantic_embeddings.npy")
 
 # Debug log right after normalization (helps startup diagnostics)
 logger.info(f"guardrail: MODEL_DIR={MODEL_DIR!r} (exists={MODEL_DIR.exists()})")
@@ -364,7 +366,10 @@ def _load_guardrail_resources():
             corpus_texts = _joblib.load(SEMANTIC_TEXTS_PATH)
             corpus_labels = _joblib.load(SEMANTIC_LABELS_PATH)
             corpus_emb = np.load(SEMANTIC_EMB_PATH)
-            embedder = SentenceTransformer(embedding_model_name)
+            embedder = SentenceTransformer(
+                embedding_model_name,
+                device="cpu"
+            )
 
             if len(corpus_texts) != len(corpus_labels):
                 raise ValueError("semantic_texts and semantic_labels length mismatch")

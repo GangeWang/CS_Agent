@@ -73,11 +73,21 @@ cp .env.example .env
 
 ### `WS /ws/chat`
 
-前端送出：
+前端送出（客服模式，預設）：
 
 ```json
 {
   "messages": [{"role": "user", "content": "你好"}],
+  "model": "your-model"
+}
+```
+
+前端送出（Agent 模式）：
+
+```json
+{
+  "mode": "agent",
+  "messages": [{"role": "user", "content": "現在時間"}],
   "model": "your-model"
 }
 ```
@@ -88,7 +98,7 @@ cp .env.example .env
 - `{"type":"clear_history"}`
 - `{"type":"end_conversation"}`
 
-後端事件：
+後端事件（客服模式）：
 
 - `delta`
 - `done`
@@ -98,6 +108,11 @@ cp .env.example .env
 - `history_cleared`
 - `conversation_summary`
 - `conversation_ended`
+
+Agent 模式新增事件：
+
+- `agent_trace`（plan + tool_results）
+- `agent_final`
 
 ---
 
