@@ -34,7 +34,8 @@ CS_Agent/
 │   │   └── policy.py
 │   ├── classifcation/      # 分類模型相關（本 README 不展開）
 │   └── README.md
-├── llm_service/            # LLAMA / llama.cpp-compatible server
+├── LLM_gen/
+│   └── llm_service/        # LLAMA / llama.cpp-compatible server
 ├── frontend/               # React + Vite 聊天前端
 │   └── README.md
 ├── database/               # database assets / migrations
@@ -90,5 +91,5 @@ ws://<目前網頁主機>:8000/ws/chat
 ## 注意事項
 
 - `backend/classifcation/` 為獨立分類資料與模型目錄，請依該目錄內文件與流程管理。
-- `llm_service/` 放置推理服務入口，後端透過 `LLAMA_API_URL` 呼叫該服務。
+- `LLM_gen/llm_service/` 放置推理服務入口，後端透過 `LLAMA_API_URL` 呼叫該服務。
 - 正式環境請務必設定 `.env`，不要使用預設 URL / timeout 直接上線。
