@@ -12,6 +12,7 @@ from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
 from ..services.guardrail import classify_text
+from ..services.agent.runner import run_agent
 from ..utils.jsonsafe import json_dumps
 from ..config import settings
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 IDLE_TIMEOUT_SECONDS = 180
 IDLE_WARNING_SECONDS_BEFORE_END = 60
+ABUSIVE_COOLDOWN_NOTICE = "提醒您保持禮貌與冷靜，我會盡力協助您解決問題。"
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -208,7 +210,6 @@ async def ws_chat(websocket: WebSocket) -> None:
             idle_warning_sent = False
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
-            guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
             await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
 
@@ -217,6 +218,35 @@ async def ws_chat(websocket: WebSocket) -> None:
                 last_model = model
             history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
             conversation_sessions[session_id] = history
+
+            mode = payload.get("mode")
+            if mode == "agent":
+                if guardrail_label in {"PROMPT_ATTACK", "SPAM"}:
+                    await websocket.send_text(json_dumps({
+                        "type": "error",
+                        "error": "內容違規，無法處理。"
+                    }))
+                    continue
+
+                agent_result = await asyncio.to_thread(run_agent, messages, model, session_id)
+                final_text = agent_result["final"]
+                if guardrail_label == "ABUSIVE":
+                    final_text = f"{ABUSIVE_COOLDOWN_NOTICE}\n\n{final_text}"
+
+                _append_and_trim_history(session_id, user_msg, final_text)
+
+                await websocket.send_text(json_dumps({
+                    "type": "agent_trace",
+                    "plan": agent_result["plan"],
+                    "tool_results": agent_result["tool_results"]
+                }))
+                await websocket.send_text(json_dumps({
+                    "type": "agent_final",
+                    "text": final_text
+                }))
+                continue
+
+            guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
             # 不改 request_stream_sync 簽名：把 system instruction 注入 history
             augmented_history = [{"role": "system", "content": guardrail_instruction}] + history.copy()
