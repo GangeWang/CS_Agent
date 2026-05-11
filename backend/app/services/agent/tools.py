@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict
 
 ToolFn = Callable[..., Any]
@@ -32,7 +32,7 @@ def get_tool(name: str) -> ToolSpec | None:
 
 # ---- MVP Tools ----
 def get_time() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def summarize(text: str) -> str:
