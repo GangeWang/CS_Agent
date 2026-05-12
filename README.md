@@ -1,6 +1,6 @@
 # CS_Agent
 
-CS_Agent 是一個以 **FastAPI（後端）+ React/Vite（前端）** 建置的即時客服對話系統，具備：
+CS_Agent 是一個以 **FastAPI（後端）+ React/Vite（前端）** 建置的即時客服對話系統，特色包含：
 
 - WebSocket 串流回覆（`delta` / `done`）
 - Guardrail 分類（一般、辱罵、提示攻擊、垃圾訊息）
@@ -19,9 +19,11 @@ CS_Agent/
 │   │   ├── config.py
 │   │   ├── routers/ws.py
 │   │   └── services/
-│   ├── classifcation/       # 分類模型相關（本 README 不展開）
+│   ├── classifcation/       # 分類模型相關（另見其 README）
 │   └── README.md
 ├── Front/                   # React + Vite 聊天前端
+│   └── README.md
+├── LLM_gen/                 # 本地 LLM 推理服務（llama.cpp）
 │   └── README.md
 └── README.md
 ```
@@ -46,11 +48,15 @@ npm ci
 npm run dev
 ```
 
-預設前端會連到：
+前端預設連線到：
 
 ```text
 ws://<目前網頁主機>:8000/ws/chat
 ```
+
+### 3) （選用）啟動 LLM 服務
+
+若需要本地 llama.cpp 服務，可參考 `LLM_gen/README.md`。
 
 ---
 
@@ -63,10 +69,11 @@ ws://<目前網頁主機>:8000/ws/chat
 
 ---
 
-## 文件導覽
+## 文件索引
 
 - 後端說明：`backend/README.md`
 - 前端說明：`Front/README.md`
+- LLM 服務：`LLM_gen/README.md`
 - 本次程式審查：`CODE_REVIEW_2026-04-28.md`
 
 ---
