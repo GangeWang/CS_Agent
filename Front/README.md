@@ -1,4 +1,4 @@
-# CS_Agent Frontend
+# CS_Agent 前端
 
 本目錄為 React + Vite 前端，提供客服聊天 UI，透過 WebSocket 與後端進行即時串流互動。
 
@@ -6,8 +6,7 @@
 
 ## 技術堆疊
 
-- React 19
-- Vite
+- React 19 + Vite
 - react-markdown + remark-gfm + remark-math
 - rehype-katex + rehype-sanitize
 - DOMPurify
@@ -22,7 +21,7 @@ npm ci
 npm run dev
 ```
 
-其他常用指令：
+常用指令：
 
 ```bash
 npm run lint
@@ -50,7 +49,7 @@ VITE_WS_PORT=8000
 
 ---
 
-## 前端功能摘要
+## 功能摘要
 
 - 串流接收 `delta`，以 buffer + flush 方式降低高頻重繪
 - 支援 `ping/pong` 心跳與斷線重連（exponential backoff）
@@ -60,8 +59,8 @@ VITE_WS_PORT=8000
 
 ---
 
-## 開發注意
+## 開發提醒
 
 - 後端事件型別若變更，需同步調整 `src/App.jsx` 的 `handleWsPayload`。
-- 若要優化首屏體驗，可考慮將初始歡迎訊息與個資表單拆分成獨立元件。
+- 若要優化首屏體驗，可將初始歡迎訊息與個資表單拆成獨立元件。
 - lint/build 需在 Node.js 18+ 環境下執行。

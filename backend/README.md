@@ -1,4 +1,4 @@
-# CS_Agent Backend
+# CS_Agent 後端
 
 本目錄提供 CS_Agent 的 FastAPI 後端，負責：
 
@@ -116,7 +116,7 @@ Agent 模式新增事件：
 
 ---
 
-## 開發建議
+## 開發提醒
 
 - 請先閱讀 `CODE_REVIEW_2026-04-28.md` 再進行重構。
 - 若要延伸訊息協定，請同步更新前端 `Front/src/App.jsx` 的 payload handler。
