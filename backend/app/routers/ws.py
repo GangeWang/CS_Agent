@@ -211,7 +211,7 @@ async def ws_chat(websocket: WebSocket) -> None:
             idle_warning_sent = False
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
-
+            guardrail_instruction = _build_guardrail_instruction(guardrail_label)
             await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
 
             model = payload.get("model")
@@ -223,7 +223,7 @@ async def ws_chat(websocket: WebSocket) -> None:
             mode = payload.get("mode")
             if mode == "agent":
                 # ✅ 不再硬擋，讓 LLM 根據 guardrail 自己判斷
-                guardrail_instruction = _build_guardrail_instruction(guardrail_label)
+
 
                 agent_messages = [{"role": "system", "content": guardrail_instruction}] + history.copy()
                 agent_messages.append({"role": "user", "content": user_msg})

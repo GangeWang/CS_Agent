@@ -511,7 +511,6 @@ export default function App() {
                 <div className="container">
                     <div>
                         <h1>智慧聊天機器人</h1>
-                        <div className="meta">建立 Ollama 的智慧聊天系統</div>
                     </div>
                     <label className="agent-toggle" title="開啟後所有問答會使用 Agent 模式，關閉後回到一般對話模式；兩種模式共用同一份對話記憶。">
                         <input
