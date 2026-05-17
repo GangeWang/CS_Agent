@@ -228,7 +228,11 @@ async def ws_chat(websocket: WebSocket) -> None:
                     }))
                     continue
 
-                agent_result = await asyncio.to_thread(run_agent, messages, model, session_id)
+                # Agent 模式與一般對話模式共用 conversation_sessions 作為短期記憶。
+                # 前端只需要送出最新訊息；後端會把同一個 WebSocket session 的歷史補進 Agent。
+                agent_messages = history.copy()
+                agent_messages.append({"role": "user", "content": user_msg})
+                agent_result = await asyncio.to_thread(run_agent, agent_messages, model, None)
                 final_text = agent_result["final"]
                 if guardrail_label == "ABUSIVE":
                     final_text = f"{ABUSIVE_COOLDOWN_NOTICE}\n\n{final_text}"
