@@ -57,20 +57,7 @@ def run_agent(
     plan = _ensure_respond_step(plan_steps(user_msg))
     tool_results = execute_plan(plan)
 
-    # 判斷 lookup_doc 是否沒命中（空字串 / no match / not found 視為沒命中）
-    def _is_doc_miss(val: object) -> bool:
-        if not val:
-            return True
-        text = str(val).lower()
-        return ("no match" in text) or ("not found" in text)
-
-    lookup_outputs = [
-        r.get("output", "")
-        for r in tool_results
-        if r.get("tool") == "lookup_doc" and "output" in r
-    ]
-    lookup_missed = any(_is_doc_miss(o) for o in lookup_outputs) if lookup_outputs else False
-
+    # 工具結果 → system content
     tool_summary_lines = []
     for result in tool_results:
         if "output" in result:
@@ -79,13 +66,18 @@ def run_agent(
             tool_summary_lines.append(f"- {result['tool']}: ERROR {result.get('error')}")
     tool_summary = "\n".join(tool_summary_lines).strip()
 
-    agent_system = (
+    agent_system_base = (
         "你是客服助理，請根據工具結果回答使用者問題。"
         "請全程使用自然、有人味的繁體中文。"
     )
+    merged_system = agent_system_base
+    if tool_summary:
+        merged_system += "\n\n工具結果：\n" + tool_summary
 
     history = get_short_term(session_id) if session_id is not None else []
-    augmented_history = [{"role": "system", "content": agent_system}] + history
+
+    # 注意：guardrail system 會在 ws.py 注入
+    augmented_history = [{"role": "system", "content": merged_system}] + history
 
     final_chunks: List[str] = []
     error_text: List[str] = []
@@ -99,10 +91,7 @@ def run_agent(
         if on_chunk:
             on_chunk(chunk)
 
-    if lookup_missed:
-        llm_user_msg = f"使用者問題：{user_msg}"
-    else:
-        llm_user_msg = f"使用者問題：{user_msg}\n\n工具結果：\n{tool_summary}"
+    llm_user_msg = f"使用者問題：{user_msg}"
 
     request_stream_sync(
         llm_user_msg,

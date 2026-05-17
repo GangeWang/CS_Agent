@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 IDLE_TIMEOUT_SECONDS = 180
 IDLE_WARNING_SECONDS_BEFORE_END = 60
-ABUSIVE_COOLDOWN_NOTICE = "提醒您保持禮貌與冷靜，我會盡力協助您解決問題。"
+ABUSIVE_COOLDOWN_NOTICE = ""
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -222,19 +222,16 @@ async def ws_chat(websocket: WebSocket) -> None:
 
             mode = payload.get("mode")
             if mode == "agent":
-                if guardrail_label in {"PROMPT_ATTACK", "SPAM"}:
-                    await websocket.send_text(json_dumps({
-                        "type": "error",
-                        "error": "內容違規，無法處理。"
-                    }))
-                    continue
+                # ✅ 不再硬擋，讓 LLM 根據 guardrail 自己判斷
+                guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
-                agent_messages = history.copy()
+                agent_messages = [{"role": "system", "content": guardrail_instruction}] + history.copy()
                 agent_messages.append({"role": "user", "content": user_msg})
 
                 q: asyncio.Queue = asyncio.Queue()
                 assistant_response: List[str] = []
 
+                # ✅ ABUSIVE 優先降溫
                 if guardrail_label == "ABUSIVE":
                     prefix = ABUSIVE_COOLDOWN_NOTICE + "\n\n"
                     assistant_response.append(prefix)
@@ -283,14 +280,8 @@ async def ws_chat(websocket: WebSocket) -> None:
                     "plan": agent_result["plan"],
                     "tool_results": agent_result["tool_results"]
                 }))
-                await websocket.send_text(json_dumps({
-                    "type": "agent_final",
-                    "text": final_text
-                }))
+                # ✅ 不送 agent_final，避免重複
                 continue
-
-            guardrail_instruction = _build_guardrail_instruction(guardrail_label)
-
             # 不改 request_stream_sync 簽名：把 system instruction 注入 history
             augmented_history = [{"role": "system", "content": guardrail_instruction}] + history.copy()
 
