@@ -87,6 +87,8 @@ export default function App() {
     // 是否正在等待/接收後端回覆（控制送出按鈕與 UI 狀態）
     const [isLoading, setIsLoading] = useState(false)
     const [isConversationEnded, setIsConversationEnded] = useState(false)
+    // Agent 模式開關：開啟時每則問答都交由後端 Agent 流程處理；關閉時使用一般串流對話。
+    const [isAgentMode, setIsAgentMode] = useState(false)
     const [isComposing, setIsComposing] = useState(false) // ✅ 新增：IME 組字狀態
     // 聊天面板 DOM 參照，用於自動滾動到底部
     const panelRef = useRef(null)
@@ -292,6 +294,26 @@ export default function App() {
             return
         }
 
+        if (payload.type === 'agent_trace') {
+            // Agent 執行細節保留給除錯或未來 UI 展開；目前不干擾主對話泡泡。
+            console.debug('[agent] trace', payload)
+            return
+        }
+
+        if (payload.type === 'agent_final') {
+            const finalText = payload.text || ''
+            const aid = pendingAssistantId.current
+            if (aid) {
+                setMessages(prev => prev.map(m => m.id === aid ? { ...m, text: finalText } : m))
+            } else {
+                setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: finalText }])
+            }
+            pendingAssistantId.current = null
+            setIsLoading(false)
+            clearFlushTimer()
+            return
+        }
+
         if (payload.type === 'delta') {
             // 串流片段先進 buffer，再由 flush timer 批次更新 UI
             const delta = payload.text || ''
@@ -380,6 +402,7 @@ export default function App() {
             const payload = {
                 model: 'CS_AgentV12',
                 messages: [{ role: 'user', content: trimmed }],
+                mode: isAgentMode ? 'agent' : 'chat',
                 user_info: userProfile
             }
             // 請求格式與後端約定一致：model + messages[]
@@ -490,6 +513,18 @@ export default function App() {
                         <h1>智慧聊天機器人</h1>
                         <div className="meta">建立 Ollama 的智慧聊天系統</div>
                     </div>
+                    <label className="agent-toggle" title="開啟後所有問答會使用 Agent 模式，關閉後回到一般對話模式；兩種模式共用同一份對話記憶。">
+                        <input
+                            type="checkbox"
+                            checked={isAgentMode}
+                            disabled={isLoading || isConversationEnded}
+                            onChange={e => setIsAgentMode(e.target.checked)}
+                        />
+                        <span className="agent-toggle-slider" aria-hidden="true" />
+                        <span className="agent-toggle-text">
+                            Agent 模式 {isAgentMode ? '開啟' : '關閉'}
+                        </span>
+                    </label>
                 </div>
             </header>
 

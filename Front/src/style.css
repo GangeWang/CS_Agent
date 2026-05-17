@@ -270,3 +270,63 @@ body {
     .btn-send { min-width: 64px; padding: 8px 10px; }
     .header .title-card { margin-top: 16px; max-width: calc(100% - 32px); }
 }
+/* ---------- Agent mode toggle ---------- */
+.agent-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.agent-toggle input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.agent-toggle-slider {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(15,23,42,0.5);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+    transition: background 0.2s ease;
+}
+.agent-toggle-slider::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    transition: transform 0.2s ease;
+}
+.agent-toggle input:checked + .agent-toggle-slider {
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+.agent-toggle input:checked + .agent-toggle-slider::after {
+    transform: translateX(20px);
+}
+.agent-toggle input:disabled + .agent-toggle-slider,
+.agent-toggle:has(input:disabled) {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.agent-toggle-text {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+@media (max-width: 640px) {
+    .header .container { align-items: flex-start; flex-direction: column; }
+    .agent-toggle { align-self: flex-start; }
+}

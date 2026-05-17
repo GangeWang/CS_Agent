@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict
 
+from typing import Any, Callable, Dict
+from datetime import datetime, timezone, timedelta
 ToolFn = Callable[..., Any]
 
 
@@ -32,7 +32,8 @@ def get_tool(name: str) -> ToolSpec | None:
 
 # ---- MVP Tools ----
 def get_time() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone(timedelta(hours=8)))
+    return f"現在時間為\n{now.strftime('%Y.%m.%d %H:%M:%S')}"
 
 
 def summarize(text: str) -> str:
