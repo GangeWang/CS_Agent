@@ -7,6 +7,7 @@ import json
 import asyncio
 import logging
 import math
+import functools
 from typing import Dict, List
 from cachetools import TTLCache
 
@@ -228,14 +229,52 @@ async def ws_chat(websocket: WebSocket) -> None:
                     }))
                     continue
 
-                # Agent 模式與一般對話模式共用 conversation_sessions 作為短期記憶。
-                # 前端只需要送出最新訊息；後端會把同一個 WebSocket session 的歷史補進 Agent。
                 agent_messages = history.copy()
                 agent_messages.append({"role": "user", "content": user_msg})
-                agent_result = await asyncio.to_thread(run_agent, agent_messages, model, None)
-                final_text = agent_result["final"]
+
+                q: asyncio.Queue = asyncio.Queue()
+                assistant_response: List[str] = []
+
                 if guardrail_label == "ABUSIVE":
-                    final_text = f"{ABUSIVE_COOLDOWN_NOTICE}\n\n{final_text}"
+                    prefix = ABUSIVE_COOLDOWN_NOTICE + "\n\n"
+                    assistant_response.append(prefix)
+                    await websocket.send_text(json_dumps({"type": "delta", "text": prefix}))
+
+                def on_chunk(chunk: dict) -> None:
+                    try:
+                        if chunk.get("type") == "delta":
+                            assistant_response.append(chunk.get("text", ""))
+
+                        def _put() -> None:
+                            try:
+                                q.put_nowait(chunk)
+                            except asyncio.QueueFull:
+                                logger.warning(f"Queue full for session {session_id}")
+
+                        loop.call_soon_threadsafe(_put)
+                    except Exception as cb_err:
+                        logger.exception(f"agent on_chunk failed: {cb_err}")
+
+                task = loop.run_in_executor(
+                    None,
+                    functools.partial(run_agent, agent_messages, model, None, on_chunk)
+                )
+
+                try:
+                    while True:
+                        chunk = await asyncio.wait_for(q.get(), timeout=120)
+                        await websocket.send_text(json_dumps(chunk))
+
+                        if chunk.get("type") in ("done", "error"):
+                            break
+
+                except asyncio.TimeoutError:
+                    logger.error(f"Streaming timeout for session {session_id}")
+                    await websocket.send_text(json_dumps({"type": "error", "error": "模型回應逾時"}))
+
+                agent_result = await task
+
+                final_text = "".join(assistant_response).strip() or agent_result.get("final", "")
 
                 _append_and_trim_history(session_id, user_msg, final_text)
 

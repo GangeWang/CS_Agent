@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Callable
 
 from .executor import execute_plan
 from .memory import append_short_term, get_short_term
 from .planner import plan_steps
-from ..streamer import request_stream_sync  # ✅ 修正 import 路徑
+from ..streamer import request_stream_sync
 
 
 def _extract_latest_user_message(messages: object) -> str | None:
@@ -33,7 +33,12 @@ def _ensure_respond_step(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return plan + [{"step": len(plan) + 1, "action": "respond"}]
 
 
-def run_agent(messages: object, model: str | None = None, session_id: int | str | None = None) -> Dict[str, Any]:
+def run_agent(
+    messages: object,
+    model: str | None = None,
+    session_id: int | str | None = None,
+    on_chunk: Callable[[dict], None] | None = None,
+) -> Dict[str, Any]:
     user_msg = _extract_latest_user_message(messages)
     if not user_msg and session_id is not None:
         history = get_short_term(session_id)
@@ -52,15 +57,20 @@ def run_agent(messages: object, model: str | None = None, session_id: int | str 
     plan = _ensure_respond_step(plan_steps(user_msg))
     tool_results = execute_plan(plan)
 
-    # 找出 lookup_doc 是否命中（以空字串判斷）
+    # 判斷 lookup_doc 是否沒命中（空字串 / no match / not found 視為沒命中）
+    def _is_doc_miss(val: object) -> bool:
+        if not val:
+            return True
+        text = str(val).lower()
+        return ("no match" in text) or ("not found" in text)
+
     lookup_outputs = [
         r.get("output", "")
         for r in tool_results
         if r.get("tool") == "lookup_doc" and "output" in r
     ]
-    lookup_missed = any(o == "" for o in lookup_outputs) if lookup_outputs else False
+    lookup_missed = any(_is_doc_miss(o) for o in lookup_outputs) if lookup_outputs else False
 
-    # 組工具摘要
     tool_summary_lines = []
     for result in tool_results:
         if "output" in result:
@@ -80,13 +90,15 @@ def run_agent(messages: object, model: str | None = None, session_id: int | str 
     final_chunks: List[str] = []
     error_text: List[str] = []
 
-    def on_chunk(chunk: dict) -> None:
+    def _emit(chunk: dict) -> None:
         if chunk.get("type") == "delta":
             final_chunks.append(chunk.get("text", ""))
         if chunk.get("type") == "error":
             error_text.append(chunk.get("error", ""))
 
-    # 若查不到文件 → 直接用使用者問題給 LLM
+        if on_chunk:
+            on_chunk(chunk)
+
     if lookup_missed:
         llm_user_msg = f"使用者問題：{user_msg}"
     else:
@@ -95,7 +107,7 @@ def run_agent(messages: object, model: str | None = None, session_id: int | str 
     request_stream_sync(
         llm_user_msg,
         model,
-        on_chunk,
+        _emit,
         augmented_history,
     )
 
