@@ -1,15 +1,29 @@
 # CS_Agent 前端
 
-本目錄為 React + Vite 前端，提供客服聊天 UI，透過 WebSocket 與後端進行即時串流互動。
+本目錄為 **React + Vite** 前端專案，提供客服聊天 UI，透過 WebSocket 與後端進行即時串流互動。前端重點在於**串流渲染效能、Markdown/數學式顯示、內容安全清理**。
 
 ---
 
-## 技術堆疊
+## 技術堆疊（詳細）
 
-- React 19 + Vite
-- react-markdown + remark-gfm + remark-math
-- rehype-katex + rehype-sanitize
-- DOMPurify
+- **React 19**：UI 組件與狀態更新。
+- **Vite（rolldown-vite）**：開發伺服器與正式建置。
+- **ESLint**：前端程式碼品質檢查。
+- **react-markdown**：Markdown 內容渲染。
+- **remark-gfm / remark-math**：GFM 與數學式語法支援。
+- **rehype-katex**：KaTeX 數學公式排版。
+- **rehype-highlight + highlight.js**：程式碼區塊語法高亮。
+- **rehype-raw + rehype-sanitize**：受控 HTML 解析與安全白名單。
+- **DOMPurify**：前端輸入/輸出雙層清理，避免 XSS。
+
+---
+
+## 功能摘要
+
+- **串流接收 `delta`**：採 buffer + flush 方式降低高頻重繪。
+- **心跳與重連**：支援 `ping/pong`，斷線後 exponential backoff 重連。
+- **對話狀態提示**：`idle_warning`、`conversation_summary`、`conversation_ended`。
+- **安全渲染**：Markdown、數學公式、程式碼區塊皆經過清理與白名單控制。
 
 ---
 
@@ -46,16 +60,6 @@ VITE_WS_URL=ws://your-host:8000/ws/chat
 # 或只覆蓋 port
 VITE_WS_PORT=8000
 ```
-
----
-
-## 功能摘要
-
-- 串流接收 `delta`，以 buffer + flush 方式降低高頻重繪
-- 支援 `ping/pong` 心跳與斷線重連（exponential backoff）
-- 顯示 `idle_warning`、`conversation_summary`、`conversation_ended`
-- Markdown、數學公式、程式碼內容渲染
-- 輸入與渲染雙層內容清理（DOMPurify + rehype-sanitize）
 
 ---
 

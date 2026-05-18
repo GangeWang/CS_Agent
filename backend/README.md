@@ -1,13 +1,20 @@
 # CS_Agent 後端
 
-本目錄提供 CS_Agent 的 FastAPI 後端，負責：
+本目錄提供 CS_Agent 的 **FastAPI 後端**，負責 **WebSocket 聊天會話、Guardrail 文字分類、LLM 串流推理** 與基礎健康檢查。
 
-- WebSocket 聊天會話（`/ws/chat`）
-- Guardrail 文字分類與回覆策略注入
-- 串流呼叫 LLM 推理服務
-- 健康檢查（`/health`）與啟動預熱
+> 本文件**不覆蓋** `backend/classifcation/` 的細節。
 
-> 本文件不覆蓋 `backend/classifcation/` 的細節。
+---
+
+## 技術堆疊（詳細）
+
+- **FastAPI**：API/WS 框架與路由管理。
+- **Uvicorn（ASGI）**：高效能伺服器，支援 WebSocket。
+- **Pydantic / Pydantic Settings**：`.env` 與設定管理。
+- **httpx**：呼叫外部 LLM 推理服務（支援串流）。
+- **websockets**：WebSocket 通訊支援。
+- **cachetools**：快取與 session 狀態管理。
+- **python-multipart**：表單資料解析（擴充上傳/表單功能時使用）。
 
 ---
 
@@ -47,21 +54,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ## 設定方式
 
-1. 複製環境檔：
+1) 複製環境檔：
 
 ```bash
 cp .env.example .env
 ```
 
-2. 依部署環境調整：
+2) 依部署環境調整（以 `app/config.py` 為準）：
 
 - `LLAMA_API_URL`：LLM 推理服務 URL
-- `LLAMA_API_KEY`：若推理服務有做金鑰驗證
+- `LLAMA_API_KEY`：若推理服務需要金鑰
 - `MAX_MESSAGE_SIZE`：WebSocket 訊息大小上限
 - `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
 - `CORS_ORIGINS`：允許前端來源
-
-> 實際預設值以 `app/config.py` 為準。
 
 ---
 
