@@ -37,6 +37,22 @@ CS_Agent 是一個**即時客服對話系統**，採用 **FastAPI（後端）+ R
 
 ---
 
+## 系統流程圖
+
+```mermaid
+flowchart LR
+    User[使用者] -->|輸入問題| Front[前端 UI]
+    Front -->|WebSocket /ws/chat| Backend[FastAPI 後端]
+    Backend --> Guardrail[Guardrail 分類]
+    Guardrail -->|允許| LLM[LLM 推理服務]
+    Guardrail -->|拒絕/改寫| Backend
+    LLM -->|串流回覆 delta/done| Backend
+    Backend -->|串流回覆| Front
+    Front -->|渲染 Markdown/KaTeX| User
+```
+
+---
+
 ## 專案結構
 
 ```text
