@@ -6,9 +6,9 @@
     "SPAM"
   ],
   "thresholds": {
-    "NORMAL": 0.64,
+    "NORMAL": 0.56,
     "ABUSIVE": 0.3,
-    "PROMPT_ATTACK": 0.48,
+    "PROMPT_ATTACK": 0.3,
     "SPAM": 0.3
   },
   "max_len": 200,

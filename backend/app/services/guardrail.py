@@ -469,8 +469,27 @@ def classify_text(text: str) -> dict:
                 "topk": [],
                 "available": True,
             }
+        ml_label, ml_conf, probs, flags = _predict_ovr_transformer(
+            models=models,
+            tokenizers=tokenizers,
+            thresholds=thresholds,
+            text=text,
+            device=device,
+            max_len=max_len,
+        )
 
-        # Stage 2: SEMANTIC (optional)
+        if ml_label != "UNCERTAIN":
+            return {
+                "stage": "ML",
+                "label": ml_label,
+                "confidence": ml_conf,
+                "reason": f"ovr {ml_label} passed threshold",
+                "probs": probs,
+                "flags": flags,
+                "topk": [],
+                "available": True,
+            }
+        # Stage 2:  ML (OvR Transformer)
         if embedder is not None and corpus_emb is not None and len(corpus_texts) > 0:
             sem_label, sem_conf, topk = _semantic_predict(
                 text=text,
@@ -495,28 +514,7 @@ def classify_text(text: str) -> dict:
                     "available": True,
                 }
 
-        # Stage 3: ML (OvR Transformer)
-        ml_label, ml_conf, probs, flags = _predict_ovr_transformer(
-            models=models,
-            tokenizers=tokenizers,
-            thresholds=thresholds,
-            text=text,
-            device=device,
-            max_len=max_len,
-        )
-
-        if ml_label != "UNCERTAIN":
-            return {
-                "stage": "ML",
-                "label": ml_label,
-                "confidence": ml_conf,
-                "reason": f"ovr {ml_label} passed threshold",
-                "probs": probs,
-                "flags": flags,
-                "topk": [],
-                "available": True,
-            }
-
+        # Stage 3: SEMANTIC (optional)
         # Final uncertain (service available, but no confident class)
         return {
             "stage": "UNCERTAIN",

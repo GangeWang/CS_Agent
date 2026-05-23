@@ -10,7 +10,7 @@ from sklearn.metrics import classification_report    # 用於評估模型表現
 
 
 # 指定資料與模型儲存的路徑
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big.csv")  # CSV 資料路徑
+DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")  # CSV 資料路徑
 MODEL_PATH = Path("backend_ml_guardrail_model.joblib")           # 模型儲存路徑
 
 

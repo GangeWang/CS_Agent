@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big.csv")
+DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
 OUT_DIR = Path("./backend_ml_ovr_bilstm_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 

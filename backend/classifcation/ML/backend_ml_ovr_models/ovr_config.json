@@ -6,10 +6,10 @@
     "SPAM"
   ],
   "thresholds": {
-    "NORMAL": 0.32,
-    "ABUSIVE": 0.82,
-    "PROMPT_ATTACK": 0.66,
-    "SPAM": 0.52
+    "NORMAL": 0.38,
+    "ABUSIVE": 0.6,
+    "PROMPT_ATTACK": 0.48,
+    "SPAM": 0.44
   },
   "model_dir": "backend_ml_ovr_models",
   "note": "OvR binary models: label vs not_label"

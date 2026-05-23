@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
 # 你的原始資料檔（每行: 句子,標籤）
-RAW_PATH = Path("classifcation/backend_ml_data_guardrail_augmented_big.csv")
+RAW_PATH = Path("classifcation/backend_ml_data_guardrail_augmented_big_v2_5000.csv")
 MODEL_DIR = Path("semantic_models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 

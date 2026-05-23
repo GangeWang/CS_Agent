@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big.csv")
+DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
 MODEL_PATH = Path("backend_ml_guardrail_bilstm_pytorch.pt")
 TOKENIZER_PATH = Path("backend_ml_guardrail_vocab.joblib")
 LABEL_ENCODER_PATH = Path("backend_ml_guardrail_label_encoder.joblib")
