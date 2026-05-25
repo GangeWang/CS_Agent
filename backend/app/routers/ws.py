@@ -12,6 +12,7 @@ from typing import Dict, List
 from cachetools import TTLCache
 
 from ..services.streamer import request_stream_sync
+from ..services.rag import retrieve_rag_answer
 from ..services.guardrail import classify_text
 from ..services.agent.runner import run_agent
 from ..utils.jsonsafe import json_dumps
@@ -211,7 +212,21 @@ async def ws_chat(websocket: WebSocket) -> None:
             idle_warning_sent = False
 
             guardrail_label = classify_text(user_msg).get("label", "NORMAL")
+            rag_answer = retrieve_rag_answer(user_msg)
+            if rag_answer:
+                rag_instruction = (
+                    "[RAG_HIT]\n"
+                    "以下是已驗證知識庫內容，請以這份內容為核心回答，"
+                    "可以用不同話術重新表達，但不要改變事實或新增未提供資訊。\n"
+                    f"知識庫答案：{rag_answer}"
+                )
+            else:
+                rag_instruction = ""
+
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
+            effective_system_instruction = guardrail_instruction
+            if rag_instruction:
+                effective_system_instruction = f"{guardrail_instruction}\n\n{rag_instruction}"
             await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
 
             model = payload.get("model")
@@ -225,7 +240,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 # ✅ 不再硬擋，讓 LLM 根據 guardrail 自己判斷
 
 
-                agent_messages = [{"role": "system", "content": guardrail_instruction}] + history.copy()
+                agent_messages = [{"role": "system", "content": effective_system_instruction}] + history.copy()
                 agent_messages.append({"role": "user", "content": user_msg})
 
                 q: asyncio.Queue = asyncio.Queue()
@@ -283,7 +298,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 # ✅ 不送 agent_final，避免重複
                 continue
             # 不改 request_stream_sync 簽名：把 system instruction 注入 history
-            augmented_history = [{"role": "system", "content": guardrail_instruction}] + history.copy()
+            augmented_history = [{"role": "system", "content": effective_system_instruction}] + history.copy()
 
             q: asyncio.Queue = asyncio.Queue()
             assistant_response: List[str] = []
