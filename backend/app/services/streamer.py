@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from typing import Callable, Optional
+
 import httpx
 
 from ..config import settings
@@ -20,6 +21,9 @@ SYSTEM_PROMPT = (
     "不要提到 ChatGPT、OpenAI、AI、語言模型。"
     "若被問「你是誰」，請固定回答："
     "「您好，我是服務中心的線上客服助手，很高興為您服務。」"
+    "\n"
+    "重要：請勿輸出推理過程、analysis、工具呼叫內容或任何內部標記；"
+    "只輸出給使用者看的最終回覆內容。"
 )
 
 # ── Channel filter 常數 ────────────────────────────────────────────────────────
@@ -29,6 +33,9 @@ SYSTEM_PROMPT = (
 # 任何 <|...|> 格式的特殊 token 一律清除，避免其他標記漏出。
 _CHANNEL_FINAL_MARKER = "<|channel|>final<|message|>"
 _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|>]*\|>")
+
+# Optional extra sanitizer patterns for common leakage
+_ANALYSIS_PREFIX_RE = re.compile(r"^\s*(analysis|assistantcommentary)\b", re.IGNORECASE)
 
 
 class _ChannelFilter:
@@ -56,6 +63,7 @@ class _ChannelFilter:
             # 串流結束：若從未找到 final marker，將緩衝內容清理後整段輸出（fallback）
             if not self._found_final and self._buf:
                 clean = _SPECIAL_TOKEN_RE.sub("", self._buf).strip()
+                clean = _sanitize_visible_text(clean)
                 if clean:
                     self._on_chunk({"type": "delta", "text": clean})
             self._buf = ""
@@ -74,6 +82,7 @@ class _ChannelFilter:
         if self._found_final:
             # 已進入 final 區段：清除殘留特殊 token 後立即放行
             clean = _SPECIAL_TOKEN_RE.sub("", text)
+            clean = _sanitize_visible_text(clean)
             if clean:
                 self._on_chunk({"type": "delta", "text": clean})
             return
@@ -86,9 +95,26 @@ class _ChannelFilter:
             self._found_final = True
             self._buf = ""  # 釋放記憶體
             clean = _SPECIAL_TOKEN_RE.sub("", after)
+            clean = _sanitize_visible_text(clean)
             if clean:
                 self._on_chunk({"type": "delta", "text": clean})
         # else: 繼續累積，等待 marker 出現或串流結束觸發 fallback
+
+
+def _sanitize_visible_text(text: str) -> str:
+    """
+    Drop obvious internal leakage tokens if the model outputs them as plain text.
+    This is a best-effort safety net; main protection should be:
+    - strict SSE JSON parsing (do not forward non-JSON lines)
+    - WS chunk type allowlist (delta/done/error only)
+    """
+    if not text:
+        return ""
+    # If the whole chunk starts with analysis/assistantcommentary, drop it.
+    # (Prevents cases like "analysisWeneedtorespond..." from reaching the UI.)
+    if _ANALYSIS_PREFIX_RE.match(text):
+        return ""
+    return text
 
 
 def _strip_channel_tokens(text: str) -> str:
@@ -96,7 +122,9 @@ def _strip_channel_tokens(text: str) -> str:
     if _CHANNEL_FINAL_MARKER in text:
         _, after = text.split(_CHANNEL_FINAL_MARKER, 1)
         text = after
-    return _SPECIAL_TOKEN_RE.sub("", text).strip()
+    text = _SPECIAL_TOKEN_RE.sub("", text).strip()
+    text = _sanitize_visible_text(text)
+    return text.strip()
 
 
 def _build_effective_system_prompt(conversation_history: Optional[list[dict]]) -> str:
@@ -143,6 +171,11 @@ def _build_prompt(system_prompt: str, conversation_history: Optional[list[dict]]
 
 
 def _extract_text_from_part(part: dict) -> Optional[str]:
+    """
+    Strict-ish extraction:
+    - Prefer known streaming schema fields.
+    - Avoid broad fallbacks like response/output/content that might contain debug metadata.
+    """
     if isinstance(part.get("text"), str):
         return part.get("text")
 
@@ -162,32 +195,22 @@ def _extract_text_from_part(part: dict) -> Optional[str]:
     if isinstance(message, dict) and isinstance(message.get("content"), str):
         return message.get("content")
 
-    for key in ("response", "response_text", "output", "content"):
-        v = part.get(key)
-        if isinstance(v, str) and v:
-            return v
-
     return None
 
 
 def request_stream_sync(
-        user_msg: str,
-        model: Optional[str],
-        on_chunk: Callable[[dict], None],
-        conversation_history: Optional[list[dict]] = None
+    user_msg: str,
+    model: Optional[str],
+    on_chunk: Callable[[dict], None],
+    conversation_history: Optional[list[dict]] = None,
 ) -> None:
     """
     同步 streaming wrapper。
 
-    修正：
-    1. _ChannelFilter 改為完整累積緩衝 + done 時 fallback 輸出，
-       解決「沒有 final marker 時記憶消失、文字全部被丟棄」的問題。
-    2. _build_effective_system_prompt 從 conversation_history 提取 guardrail instruction，
-       注入 payload 的 system_prompt 欄位，讓 label 真正影響模型行為。
-    3. messages 陣列中的 system role 訊息一律移除，統一從 system_prompt 欄位傳遞，
-       避免 server 重複或錯誤解析。
-    4. effective_max_tokens 確保至少 1024，避免 analysis 段落吃掉 token 配額
-       導致真正的回覆在中途被截斷。
+    修正（防止內部 debug/analysis 泄漏到前端）：
+    - 若 SSE 行不是 JSON：不再轉成 delta 轉發，改為 debug log 後丟棄。
+    - _extract_text_from_part 改為較嚴格，只取已知 schema，避免抓到 debug 欄位。
+    - _ChannelFilter + _sanitize_visible_text 作為額外保險，避免 analysis 類字串直接顯示。
     """
     # 包裝 on_chunk，過濾 channel 標記
     _filter = _ChannelFilter(on_chunk)
@@ -197,10 +220,7 @@ def request_stream_sync(
     effective_system_prompt = _build_effective_system_prompt(conversation_history)
 
     # 建立 messages 陣列：排除 system role（已移至 system_prompt 欄位），加入當前用戶訊息
-    messages = [
-        m for m in (conversation_history or [])
-        if m.get("role") != "system"
-    ]
+    messages = [m for m in (conversation_history or []) if m.get("role") != "system"]
     messages.append({"role": "user", "content": user_msg})
 
     # channel 格式模型的 analysis 段落本身消耗 token，
@@ -221,13 +241,10 @@ def request_stream_sync(
 
     try:
         client = httpx.Client(
-            timeout=httpx.Timeout(
-                timeout=settings.llama_request_timeout,
-                connect=settings.connect_timeout
-            )
+            timeout=httpx.Timeout(timeout=settings.llama_request_timeout, connect=settings.connect_timeout)
         )
     except Exception as e:
-        logger.error(f"Failed to create HTTP client: {e}")
+        logger.error("Failed to create HTTP client: %s", e)
         filtered_on_chunk({"type": "error", "error": f"建立 HTTP 客戶端失敗：{e}"})
         return
 
@@ -235,19 +252,20 @@ def request_stream_sync(
         with client.stream("POST", ENDPOINT_STREAM, json=payload, headers=headers) as resp:
             if resp.status_code != 200:
                 error_msg = f"HTTP {resp.status_code}: {resp.text}"
-                logger.error(f"Stream request failed: {error_msg}")
+                logger.error("Stream request failed: %s", error_msg)
                 filtered_on_chunk({"type": "error", "error": error_msg})
                 return
 
             for raw in resp.iter_lines():
                 if not raw:
                     continue
+
                 line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
                 line = line.strip()
                 _debug("RAW LINE:", line)
 
                 if line.startswith("data:"):
-                    data = line[len("data:"):].strip()
+                    data = line[len("data:") :].strip()
                 else:
                     data = line
 
@@ -258,16 +276,16 @@ def request_stream_sync(
                     filtered_on_chunk({"type": "done"})
                     return
 
+                # --- IMPORTANT CHANGE: drop non-JSON SSE lines ---
                 try:
                     part = json.loads(data)
                 except Exception:
-                    text_chunk = data.strip()
-                    if text_chunk:
-                        filtered_on_chunk({"type": "delta", "text": text_chunk})
+                    _debug("Dropped non-JSON SSE line:", data[:200])
                     continue
 
                 if isinstance(part, dict) and part.get("done") is True:
                     text_chunk = _extract_text_from_part(part) or ""
+                    text_chunk = _sanitize_visible_text(text_chunk)
                     if text_chunk:
                         filtered_on_chunk({"type": "delta", "text": text_chunk})
                     filtered_on_chunk({"type": "done"})
@@ -278,20 +296,25 @@ def request_stream_sync(
                     _debug("skipping non-visible chunk:", json.dumps(part, ensure_ascii=False)[:200])
                     continue
 
+                text_chunk = _sanitize_visible_text(text_chunk)
+                if not text_chunk:
+                    _debug("dropped suspicious/empty chunk")
+                    continue
+
                 filtered_on_chunk({"type": "delta", "text": text_chunk})
 
             filtered_on_chunk({"type": "done"})
             return
 
     except Exception as e:
-        logger.warning(f"Stream exception, falling back to non-streaming: {e}")
+        logger.warning("Stream exception, falling back to non-streaming: %s", e)
 
         try:
             resp2 = client.post(
                 ENDPOINT_ONCE,
                 json=payload,
                 headers=headers,
-                timeout=settings.llama_request_timeout
+                timeout=settings.llama_request_timeout,
             )
         except Exception as e2:
             error_msg = f"LLAMA 連線失敗：{e2}"
@@ -310,8 +333,7 @@ def request_stream_sync(
             text = (
                 j.get("text")
                 or (j.get("message") and j["message"].get("content"))
-                or j.get("response")
-                or j.get("output")
+                or None
             )
             if not text:
                 text = json.dumps(j, ensure_ascii=False)
@@ -329,8 +351,9 @@ def request_stream_sync(
             return
 
         for i in range(0, len(text), CHUNK_SIZE):
-            on_chunk({"type": "delta", "text": text[i: i + CHUNK_SIZE]})
+            on_chunk({"type": "delta", "text": text[i : i + CHUNK_SIZE]})
         on_chunk({"type": "done"})
         return
+
     finally:
         client.close()
