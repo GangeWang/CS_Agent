@@ -125,3 +125,4 @@ async def health():
 
 # WebSocket 路由
 app.include_router(ws_router)
+print("LLAMA URL =", settings.llama_api_url)

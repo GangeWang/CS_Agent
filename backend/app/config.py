@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     
     # LLAMA (WSL) Configuration
     # 請設定為 WSL 上啟動的推理服務位址 (例如 http://127.0.0.1:11434)
-    llama_api_url: str = "http://100.72.254.99:10000"
+    llama_api_url: str = "http://127.0.0.1:10000"
     # 可選的簡單授權 token（若你在 WSL server 實作 API key 驗證）
     llama_api_key: str | None = None
     # streaming 最大等待時間 (s)

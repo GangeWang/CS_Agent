@@ -50,6 +50,7 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
 
 def _build_guardrail_instruction(label: str) -> str:
     print(label)
+    print("LLAMA URL =", settings.llama_api_url)
     if label == "ABUSIVE":
         return (
             "[GuardrailLabel=ABUSIVE]\n"
