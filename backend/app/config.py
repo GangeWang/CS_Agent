@@ -18,6 +18,16 @@ class Settings(BaseSettings):
     llama_request_timeout: float = 60.0
     # 預設一次生成最多 token（可視 server 支援調整）
     llama_max_tokens: int = 512
+    # 模型上下文視窗與安全保留量，用於送出前管理歷史上下文
+    llama_context_max_tokens: int = 4096
+    llama_context_reserved_output_tokens: int = 1024
+
+    # Context management: compress 會壓縮舊對話；window 會直接丟棄最舊內容
+    context_strategy: str = "compress"
+    context_compress_threshold_ratio: float = 0.8
+    context_compress_keep_recent_messages: int = 8
+    context_window_keep_recent_messages: int = 8
+    context_summary_target_chars: int = 1200
 
     # For backward compatibility (some modules may still reference ollama_*)
     ollama_url: str | None = None

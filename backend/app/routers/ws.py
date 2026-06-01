@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import settings
 from ..services.agent.runner import run_agent
+from ..services.context_manager import manage_context
 from ..services.guardrail import classify_text
 from ..services.rag import retrieve_rag_hit
 from ..services.streamer import request_stream_sync
@@ -43,9 +44,16 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
     history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
     history.append({"role": "user", "content": user_msg})
     history.append({"role": "assistant", "content": assistant_msg})
-    if len(history) > settings.history_max_length:
-        history = history[-settings.history_max_length:]
-    conversation_sessions[session_id] = history
+
+    summaries = [
+        item
+        for item in history
+        if item.get("role") == "system" and item.get("content", "").startswith("[CONVERSATION_SUMMARY]")
+    ]
+    dialogue = [item for item in history if item not in summaries]
+    if len(dialogue) > settings.history_max_length:
+        dialogue = dialogue[-settings.history_max_length:]
+    conversation_sessions[session_id] = summaries[-1:] + dialogue
 
 
 def _build_guardrail_instruction(label: str) -> str:
@@ -78,7 +86,9 @@ def _build_history_for_summary(history: List[Dict[str, str]]) -> str:
         content = item.get("content", "")
         if not content:
             continue
-        if role == "user":
+        if role == "system" and content.startswith("[CONVERSATION_SUMMARY]"):
+            lines.append(f"較早對話摘要：{content}")
+        elif role == "user":
             lines.append(f"使用者：{content}")
         elif role == "assistant":
             lines.append(f"客服助手：{content}")
@@ -269,7 +279,20 @@ async def ws_chat(websocket: WebSocket) -> None:
                 last_model = model
 
             history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
+            context_strategy = payload.get("context_strategy")
+            if not isinstance(context_strategy, str):
+                context_strategy = None
+
+            history, context_meta = manage_context(
+                history,
+                [{"role": "system", "content": effective_system_instruction}],
+                user_msg,
+                model,
+                context_strategy,
+            )
             conversation_sessions[session_id] = history
+            if context_meta.get("applied"):
+                logger.info("context managed session_id=%s meta=%s", session_id, context_meta)
 
             mode = payload.get("mode")
 

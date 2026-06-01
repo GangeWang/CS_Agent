@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Callable
 
 from .executor import execute_plan
 from .memory import append_short_term, get_short_term
+from ..context_manager import manage_context
 from .planner import plan_steps
 from ..streamer import request_stream_sync
 
@@ -25,6 +26,27 @@ def _extract_latest_user_message(messages: object) -> str | None:
         if isinstance(content, str) and content.strip():
             return content.strip()
     return None
+
+
+def _extract_history_messages(messages: object) -> List[Dict[str, str]]:
+    if not isinstance(messages, list):
+        return []
+
+    normalized: List[Dict[str, str]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"system", "user", "assistant"} and isinstance(content, str) and content.strip():
+            normalized.append({"role": role, "content": content.strip()})
+
+    # The latest user message is sent as the current prompt, so keep only prior
+    # messages in history to avoid duplicating it.
+    for idx in range(len(normalized) - 1, -1, -1):
+        if normalized[idx].get("role") == "user":
+            return normalized[:idx]
+    return normalized
 
 
 def _ensure_respond_step(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -74,10 +96,20 @@ def run_agent(
     if tool_summary:
         merged_system += "\n\n工具結果：\n" + tool_summary
 
-    history = get_short_term(session_id) if session_id is not None else []
+    if session_id is not None:
+        history = get_short_term(session_id)
+    else:
+        history = _extract_history_messages(messages)
+
+    system_messages = [{"role": "system", "content": merged_system}]
+    history, context_meta = manage_context(history, system_messages, user_msg, model)
+    if context_meta.get("applied"):
+        # Agent traces are intentionally returned only in the API result/logs, not
+        # streamed to the browser UI.
+        pass
 
     # 注意：guardrail system 會在 ws.py 注入
-    augmented_history = [{"role": "system", "content": merged_system}] + history
+    augmented_history = system_messages + history
 
     final_chunks: List[str] = []
     error_text: List[str] = []
