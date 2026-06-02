@@ -97,11 +97,14 @@ def _strip_channel_tokens(text: str) -> str:
 def _build_effective_system_prompt(conversation_history: Optional[list[dict]]) -> str:
     if not conversation_history:
         return SYSTEM_PROMPT
-    for msg in conversation_history:
-        if msg.get("role") == "system":
-            guardrail = msg.get("content", "").strip()
-            if guardrail:
-                return f"{SYSTEM_PROMPT}\n\n{guardrail}"
+
+    system_parts = [
+        msg.get("content", "").strip()
+        for msg in conversation_history
+        if msg.get("role") == "system" and msg.get("content", "").strip()
+    ]
+    if system_parts:
+        return f"{SYSTEM_PROMPT}\n\n" + "\n\n".join(system_parts)
     return SYSTEM_PROMPT
 
 

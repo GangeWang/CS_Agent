@@ -66,7 +66,42 @@ cp .env.example .env
 - `LLAMA_API_KEY`：若推理服務需要金鑰
 - `MAX_MESSAGE_SIZE`：WebSocket 訊息大小上限
 - `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
+- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：模型上下文視窗與預留輸出 token；預設參考 Ollama `gpt-oss:20b` 的 128K context window，設定為 `131072` 並預留 `4096` token 給輸出，避免 prompt 撐爆模型限制
+- `CONTEXT_STRATEGY`：上下文管理策略，支援 `compress`（預設）或 `window`
+- `CONTEXT_COMPRESS_THRESHOLD_RATIO`：預估上下文達到可用預算多少比例時觸發管理（預設 0.8）
+- `CONTEXT_COMPRESS_KEEP_RECENT_MESSAGES`：壓縮時保留最近幾則原文訊息
+- `CONTEXT_WINDOW_KEEP_RECENT_MESSAGES`：窗口裁切時至少嘗試保留最近幾則訊息
+- `CONTEXT_SUMMARY_TARGET_CHARS`：壓縮摘要的目標字數
 - `CORS_ORIGINS`：允許前端來源
+
+---
+
+
+## 上下文長度保護
+
+後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。預設上下文上限以 Ollama `gpt-oss:20b` 的 128K context window（`128 * 1024 = 131072` tokens）為基準，並透過 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS=4096` 預留輸出空間；超過門檻時可用兩種方案處理：
+
+### 方案 1：上下文壓縮（`CONTEXT_STRATEGY=compress`，預設）
+
+- 做法：將較早的對話交給 LLM 摘要成重點，保留最近幾輪原文，並把摘要作為 system context 一起送入下一次推理。
+- 優點：能保留長對話的主要需求、已答覆內容、限制條件與下一步，比直接丟棄更不容易失去脈絡。
+- 缺點：會多一次 LLM 呼叫，延遲與成本較高；摘要品質取決於模型，仍可能遺漏細節或壓縮錯誤。
+
+### 方案 2：上下文窗口（`CONTEXT_STRATEGY=window`）
+
+- 做法：從最舊訊息開始丟棄，直到剩餘上下文落在模型可用預算內。
+- 優點：速度快、成本低、行為可預測，不需要額外 LLM 摘要呼叫。
+- 缺點：被丟棄的早期資訊完全消失，長流程客服容易忘記先前條件或承諾。
+
+WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如：
+
+```json
+{
+  "messages": [{"role": "user", "content": "請延續剛剛的問題"}],
+  "model": "your-model",
+  "context_strategy": "window"
+}
+```
 
 ---
 
