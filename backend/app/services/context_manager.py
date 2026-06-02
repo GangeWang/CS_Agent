@@ -102,6 +102,8 @@ def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -
     request_stream_sync(prompt, model, on_chunk, None)
     summary = "".join(chunks).strip()
     if summary:
+        logger.info("Context compression summary generated:\n%s", summary)
+        print(f"[context_summary]\n{summary}", flush=True)
         return f"{SUMMARY_PREFIX}\n以下是較早對話的壓縮摘要，請視為歷史上下文依據：\n{summary}\n{SUMMARY_SUFFIX}"
 
     if errors:
