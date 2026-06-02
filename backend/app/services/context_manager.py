@@ -8,6 +8,8 @@ from .streamer import request_stream_sync
 
 logger = logging.getLogger(__name__)
 
+OLLAMA_GPT_OSS_20B_CONTEXT_TOKENS = 128 * 1024
+
 SUMMARY_ROLE = "system"
 SUMMARY_PREFIX = "[CONVERSATION_SUMMARY]"
 SUMMARY_SUFFIX = "[/CONVERSATION_SUMMARY]"
@@ -31,9 +33,16 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
     return total
 
 
+def _configured_context_max_tokens() -> int:
+    # Ollama lists gpt-oss:20b with a 128K context window. Use 128 * 1024
+    # tokens as the project default while still allowing deployments to lower it
+    # through LLAMA_CONTEXT_MAX_TOKENS when VRAM/RAM is constrained.
+    return max(256, int(getattr(settings, "llama_context_max_tokens", OLLAMA_GPT_OSS_20B_CONTEXT_TOKENS)))
+
+
 def _context_budget_tokens() -> int:
-    max_context = max(256, int(getattr(settings, "llama_context_max_tokens", 4096)))
-    reserved = max(0, int(getattr(settings, "llama_context_reserved_output_tokens", 1024)))
+    max_context = _configured_context_max_tokens()
+    reserved = max(0, int(getattr(settings, "llama_context_reserved_output_tokens", 4096)))
     return max(128, max_context - reserved)
 
 

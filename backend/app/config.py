@@ -19,8 +19,9 @@ class Settings(BaseSettings):
     # 預設一次生成最多 token（可視 server 支援調整）
     llama_max_tokens: int = 512
     # 模型上下文視窗與安全保留量，用於送出前管理歷史上下文
-    llama_context_max_tokens: int = 4096
-    llama_context_reserved_output_tokens: int = 1024
+    # Ollama gpt-oss:20b advertises a 128K context window (128 * 1024).
+    llama_context_max_tokens: int = 131072
+    llama_context_reserved_output_tokens: int = 4096
 
     # Context management: compress 會壓縮舊對話；window 會直接丟棄最舊內容
     context_strategy: str = "compress"

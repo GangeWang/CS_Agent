@@ -66,7 +66,7 @@ cp .env.example .env
 - `LLAMA_API_KEY`：若推理服務需要金鑰
 - `MAX_MESSAGE_SIZE`：WebSocket 訊息大小上限
 - `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
-- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：模型上下文視窗與預留輸出 token，避免 prompt 撐爆模型限制
+- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：模型上下文視窗與預留輸出 token；預設參考 Ollama `gpt-oss:20b` 的 128K context window，設定為 `131072` 並預留 `4096` token 給輸出，避免 prompt 撐爆模型限制
 - `CONTEXT_STRATEGY`：上下文管理策略，支援 `compress`（預設）或 `window`
 - `CONTEXT_COMPRESS_THRESHOLD_RATIO`：預估上下文達到可用預算多少比例時觸發管理（預設 0.8）
 - `CONTEXT_COMPRESS_KEEP_RECENT_MESSAGES`：壓縮時保留最近幾則原文訊息
@@ -79,7 +79,7 @@ cp .env.example .env
 
 ## 上下文長度保護
 
-後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數，超過門檻時可用兩種方案處理：
+後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。預設上下文上限以 Ollama `gpt-oss:20b` 的 128K context window（`128 * 1024 = 131072` tokens）為基準，並透過 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS=4096` 預留輸出空間；超過門檻時可用兩種方案處理：
 
 ### 方案 1：上下文壓縮（`CONTEXT_STRATEGY=compress`，預設）
 
