@@ -52,7 +52,7 @@ function MarkdownViewer({ source, isInitial = false }) {
             return
         }
 
-        // 初始訊息啟用打字動畫（較慢）
+        // 只有初始訊息才做打字動畫（避免串流時 source 持續變長導致 interval 反覆重置與閃爍）
         if (isInitial) {
             let i = 0
             let isMounted = true
@@ -71,28 +71,8 @@ function MarkdownViewer({ source, isInitial = false }) {
             }
         }
 
-        // 短文本：直接顯示
-        if (source.length < 50) {
-            setDisplayText(source)
-            return
-        }
-
-        // 較長的文本：快速打字動畫
-        let i = 0
-        let isMounted = true
-        const timer = setInterval(() => {
-            if (isMounted && i < source.length) {
-                setDisplayText(source.substring(0, i + 1))
-                i++
-            } else if (i >= source.length) {
-                clearInterval(timer)
-            }
-        }, 8)
-
-        return () => {
-            isMounted = false
-            clearInterval(timer)
-        }
+        // 其他情境（包含 WS delta 串流）：直接顯示最新內容，避免「從頭打字」造成反覆消失/閃爍
+        setDisplayText(source)
     }, [source, isInitial])
 
     const safeSource = typeof (displayText || source) === 'string'
