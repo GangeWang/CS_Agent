@@ -38,6 +38,50 @@ const THEME_NAMES = {
     purple: '紫色'
 }
 
+
+const MAX_ABUSE_LEVEL = 5
+const GUARDRAIL_STATUS_COPY = {
+    default: { text: 'Guardrail：正常', icon: '✅' },
+    abuse: { text: 'Guardrail：偵測到不當語氣', icon: '🚨' },
+    warning: { text: 'Guardrail：偵測到高風險請求', icon: '⚠️' },
+}
+
+function normalizeGuardrailLabel(label) {
+    if (typeof label !== 'string') return 'normal'
+    const normalized = label.trim().toLowerCase().replace(/[\s-]+/g, '_')
+    if (normalized === 'abuse' || normalized === 'abusive') return 'abuse'
+    if (normalized === 'prompt_attack' || normalized === 'spam') return 'warning'
+    if (normalized === 'normal') return 'normal'
+    return 'normal'
+}
+
+function getNextGuardrailUi(prev, label) {
+    const normalizedLabel = normalizeGuardrailLabel(label)
+
+    if (normalizedLabel === 'abuse') {
+        return {
+            state: 'abuse',
+            abuseLevel: Math.min(MAX_ABUSE_LEVEL, prev.abuseLevel + 1),
+            label,
+        }
+    }
+
+    if (normalizedLabel === 'warning') {
+        return {
+            state: 'warning',
+            abuseLevel: prev.abuseLevel,
+            label,
+        }
+    }
+
+    const abuseLevel = Math.max(0, prev.abuseLevel - 1)
+    return {
+        state: abuseLevel > 0 ? 'abuse' : 'default',
+        abuseLevel,
+        label: 'normal',
+    }
+}
+
 function validatePhone(value) {
     const digits = value.replace(/\D/g, '')
     return digits.length >= 8 && digits.length <= 15
@@ -85,9 +129,9 @@ function MarkdownViewer({ source, isInitial = false }) {
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[rehypeKatex, [rehypeSanitize, katexAllowed]]}
             components={{
-                h1: ({ node, ...props }) => <h2 style={{ marginTop: '1em', marginBottom: '0.5em' }} {...props} />,
-                h2: ({ node, ...props }) => <h3 style={{ marginTop: '0.8em', marginBottom: '0.4em' }} {...props} />,
-                h3: ({ node, ...props }) => <h4 style={{ marginTop: '0.6em', marginBottom: '0.3em' }} {...props} />,
+                h1: ({ ...props }) => <h2 style={{ marginTop: '1em', marginBottom: '0.5em' }} {...props} />,
+                h2: ({ ...props }) => <h3 style={{ marginTop: '0.8em', marginBottom: '0.4em' }} {...props} />,
+                h3: ({ ...props }) => <h4 style={{ marginTop: '0.6em', marginBottom: '0.3em' }} {...props} />,
             }}
         />
     )
@@ -148,6 +192,7 @@ export default function App() {
     const [theme, setTheme] = useState(() => {
         return localStorage.getItem('chatTheme') || 'dark'
     })
+    const [guardrailUi, setGuardrailUi] = useState({ state: 'default', abuseLevel: 0, label: 'normal' })
 
     // ===== Refs =====
     const panelRef = useRef(null)
@@ -164,6 +209,11 @@ export default function App() {
         document.documentElement.setAttribute('data-theme', theme)
         localStorage.setItem('chatTheme', theme)
     }, [theme])
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-guardrail-state', guardrailUi.state)
+        document.documentElement.setAttribute('data-abuse-level', String(guardrailUi.abuseLevel))
+    }, [guardrailUi.state, guardrailUi.abuseLevel])
 
     function handleThemeChange(newTheme) {
         setTheme(newTheme)
@@ -320,9 +370,18 @@ export default function App() {
         return ''
     }
 
+    function updateGuardrailUi(label) {
+        setGuardrailUi(prev => getNextGuardrailUi(prev, label))
+    }
+
     // ===== WebSocket 訊息處理 =====
     function handleWsPayload(payload) {
         if (!payload || typeof payload !== 'object') return
+
+        if (payload.type === 'guardrail') {
+            updateGuardrailUi(payload.label)
+            return
+        }
 
         if (payload.type === 'conversation_summary') {
             const summaryText = payload.summary || '對話摘要產生失敗。'
@@ -514,6 +573,7 @@ export default function App() {
         setProfileError('')
         setUserProfile({ name, phone })
         setIsConversationEnded(false)
+        setGuardrailUi({ state: 'default', abuseLevel: 0, label: 'normal' })
         // 保留原始歡迎訊息格式，加上使用者名稱
         setMessages([{
             id: NEXT_ID(),
@@ -563,15 +623,28 @@ export default function App() {
         )
     }
 
+    const guardrailStatus = GUARDRAIL_STATUS_COPY[guardrailUi.state] || GUARDRAIL_STATUS_COPY.default
+
     // ===== 主聊天頁面 =====
     return (
-        <div className="app">
+        <div className={`app guardrail-${guardrailUi.state}`}>
             {/* Header */}
             <header className="header">
                 <div className="container">
                     <div className="title-card">
                         <h1>具情緒反應識別與提示注入防護之大語言模型客服系統研製</h1>
 
+                    </div>
+                    <div
+                        className={`guardrail-status ${guardrailUi.state}`}
+                        title="依照後端 guardrail label 即時調整介面顏色"
+                        aria-live="polite"
+                    >
+                        <span aria-hidden="true">{guardrailStatus.icon}</span>
+                        <span>{guardrailStatus.text}</span>
+                        {guardrailUi.abuseLevel > 0 && (
+                            <span className="guardrail-level">Level {guardrailUi.abuseLevel}/{MAX_ABUSE_LEVEL}</span>
+                        )}
                     </div>
                     <label
                         className="agent-toggle"
