@@ -23,12 +23,16 @@ const WS_PORT = import.meta.env.VITE_WS_PORT || '8000'
 const WS_URL = import.meta.env.VITE_WS_URL
     || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:${WS_PORT}/ws/chat`
 
-const THEMES = ['dark', 'light', 'pink', 'red', 'yellow', 'orange', 'brown', 'gray', 'blue', 'green', 'purple']
+const THEMES = ['dark', 'light', 'pink', 'lightcoral', 'crimson', 'red', 'firebrick', 'darkred', 'yellow', 'orange', 'brown', 'gray', 'blue', 'green', 'purple']
 const THEME_NAMES = {
     dark: '深色',
     light: '淺色',
     pink: '粉色',
+    lightcoral: '淺珊瑚',
+    crimson: '赤紅',
     red: '紅色',
+    firebrick: '耐火磚',
+    darkred: '深紅',
     yellow: '黃色',
     orange: '橘色',
     brown: '棕色',
@@ -117,7 +121,11 @@ function ThemeSwitcher({ currentTheme, onThemeChange }) {
                     {theme === 'dark' && '🌙'}
                     {theme === 'light' && '☀️'}
                     {theme === 'pink' && '💖'}
+                    {theme === 'lightcoral' && '🌸'}
+                    {theme === 'crimson' && '🩸'}
                     {theme === 'red' && '❤️'}
+                    {theme === 'firebrick' && '🧱'}
+                    {theme === 'darkred' && '🩵'}  
                     {theme === 'yellow' && '⭐'}
                     {theme === 'orange' && '🔥'}
                     {theme === 'brown' && '🤎'}
