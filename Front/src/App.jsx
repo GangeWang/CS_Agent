@@ -42,6 +42,14 @@ const THEME_NAMES = {
     purple: '紫色'
 }
 
+// ===== Abuse 顏色映射 =====
+const ABUSE_LEVEL_TO_THEME = {
+    0: null,        // 使用預設顏色
+    1: 'red',       // 第1次 abuse
+    2: 'firebrick', // 第2次 abuse
+    3: 'darkred',   // 第3次+ abuse
+}
+
 function validatePhone(value) {
     const digits = value.replace(/\D/g, '')
     return digits.length >= 8 && digits.length <= 15
@@ -154,7 +162,13 @@ export default function App() {
     const [isAgentMode, setIsAgentMode] = useState(false)
     const [isComposing, setIsComposing] = useState(false)
     const [theme, setTheme] = useState(() => {
-        return localStorage.getItem('chatTheme') || 'dark'
+    return localStorage.getItem('chatTheme') || 'dark'
+    })
+
+    // ===== 新增：Abuse 計數狀態 =====
+    const [abuseLevel, setAbuseLevel] = useState(0)
+    const [defaultTheme, setDefaultTheme] = useState(() => {
+    return localStorage.getItem('chatTheme') || 'dark'
     })
 
     // ===== Refs =====
@@ -167,14 +181,21 @@ export default function App() {
     const flushTimerRef = useRef(null)
     const NEXT_ID = () => Date.now() + Math.floor(Math.random() * 1000)
 
-    // ===== 主題切換 =====
+    // ===== 主題切換邏輯 =====
+    const getEffectiveTheme = useCallback(() => {
+        const abuseTheme = ABUSE_LEVEL_TO_THEME[Math.min(abuseLevel, 3)]
+        return abuseTheme || defaultTheme
+    }, [abuseLevel, defaultTheme])
+
     useEffect(() => {
-        document.documentElement.setAttribute('data-theme', theme)
-        localStorage.setItem('chatTheme', theme)
-    }, [theme])
+       const effectiveTheme = getEffectiveTheme()
+       document.documentElement.setAttribute('data-theme', effectiveTheme)
+       localStorage.setItem('chatTheme', defaultTheme)
+    }, [getEffectiveTheme, defaultTheme])
 
     function handleThemeChange(newTheme) {
-        setTheme(newTheme)
+        setDefaultTheme(newTheme)
+        setAbuseLevel(0)  // 重置 abuse 計數
     }
 
     // ===== 自動捲軸 =====
@@ -330,9 +351,34 @@ export default function App() {
 
     // ===== WebSocket 訊息處理 =====
     function handleWsPayload(payload) {
-        if (!payload || typeof payload !== 'object') return
+        function handleWsPayload(payload) {
+    if (!payload || typeof payload !== 'object') return
 
-        if (payload.type === 'conversation_summary') {
+    // ===== 新增：處理 guardrail label =====
+    if (payload.type === 'guardrail') {
+        const label = payload.label || 'NORMAL'
+        console.log('[guardrail] label received:', label)
+
+        setAbuseLevel(prevLevel => {
+            if (label === 'ABUSIVE') {
+                // abuse 發生，增加一級（上限 3）
+                const newLevel = Math.min(prevLevel + 1, 3)
+                console.log(`[abuse] escalated from ${prevLevel} to ${newLevel}`)
+                return newLevel
+            } else {
+                // 非 abuse，降一級（下限 0）
+                if (prevLevel > 0) {
+                    const newLevel = prevLevel - 1
+                    console.log(`[abuse] de-escalated from ${prevLevel} to ${newLevel}`)
+                    return newLevel
+                }
+                return prevLevel
+            }
+        })
+        return
+    }
+
+    if (payload.type === 'conversation_summary') {
             const summaryText = payload.summary || '對話摘要產生失敗。'
             setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: `${summaryText}` }])
             return
@@ -505,30 +551,31 @@ export default function App() {
 
     // ===== Profile 提交 =====
     function submitProfile(e) {
-        e.preventDefault()
-        const name = profileForm.name.trim()
-        const phone = profileForm.phone.trim()
+    e.preventDefault()
+    const name = profileForm.name.trim()
+    const phone = profileForm.phone.trim()
 
-        if (!name || !phone) {
-            setProfileError('❌ 請輸入姓名與電話')
-            return
-        }
-
-        if (!validatePhone(phone)) {
-            setProfileError('❌ 請輸入有效電話號碼（8-15 位數字）')
-            return
-        }
-
-        setProfileError('')
-        setUserProfile({ name, phone })
-        setIsConversationEnded(false)
-        // 保留原始歡迎訊息格式，加上使用者名稱
-        setMessages([{
-            id: NEXT_ID(),
-            role: 'assistant',
-            text: `🎉 歡迎 ${name}！請輸入你的問題。`
-        }])
+    if (!name || !phone) {
+        setProfileError('❌ 請輸入姓名與電話')
+        return
     }
+
+    if (!validatePhone(phone)) {
+        setProfileError('❌ 請輸入有效電話號碼（8-15 位數字）')
+        return
+    }
+
+    setProfileError('')
+    setUserProfile({ name, phone })
+    setIsConversationEnded(false)
+    setAbuseLevel(0)  // ===== 新增：重置 abuse 計數 =====
+    // 保留原始歡迎訊息格式，加上使用者名稱
+    setMessages([{
+        id: NEXT_ID(),
+        role: 'assistant',
+        text: `🎉 歡迎 ${name}！請輸入你的問題。`
+    }])
+}
 
     // ===== 條件渲染：Profile 頁面 =====
     if (!userProfile) {
@@ -703,9 +750,20 @@ export default function App() {
                     </button>
                 </form>
 
-                {/* 主題切換器 */}
-                <div style={{ marginTop: 'var(--spacing-md)', display: 'flex', justifyContent: 'center' }}>
-                    <ThemeSwitcher currentTheme={theme} onThemeChange={handleThemeChange} />
+                {/* 主題切換器 + Abuse 級別顯示 */}
+                <div style={{ marginTop: 'var(--spacing-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <ThemeSwitcher currentTheme={defaultTheme} onThemeChange={handleThemeChange} />
+                    {/* 當前 Abuse 級別顯示 */}
+                    {abuseLevel > 0 && (
+                        <div style={{
+                            fontSize: '0.85rem',
+                            fontWeight: 600,
+                            color: 'var(--error)',
+                            marginLeft: 'var(--spacing-lg)',
+                        }}>
+                            ⚠️ 檢測到不當內容 Lv{abuseLevel}
+                        </div>
+                    )}
                 </div>
             </footer>
         </div>
