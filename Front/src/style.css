@@ -354,6 +354,75 @@
 
 }
 
+/* Guardrail 即時 UI 狀態：覆蓋使用者主題變數，但不改寫 localStorage 內的預設主題 */
+[data-guardrail-state="warning"] {
+    --primary: #f59e0b;
+    --primary-dark: #b45309;
+    --secondary: #facc15;
+    --accent: #fb923c;
+    --accent-alt: #f43f5e;
+    --border-color: #f59e0b;
+    --primary-rgb: 245, 158, 11;
+    --secondary-rgb: 250, 204, 21;
+    --bg-gradient-1: rgba(245, 158, 11, 0.28);
+    --bg-gradient-2: rgba(250, 204, 21, 0.18);
+    --bg-gradient-3: rgba(251, 146, 60, 0.12);
+}
+
+[data-guardrail-state="abuse"] {
+    --primary: #ef4444;
+    --primary-dark: #b91c1c;
+    --secondary: #fb7185;
+    --accent: #f97316;
+    --accent-alt: #fecaca;
+    --border-color: #ef4444;
+    --primary-rgb: 239, 68, 68;
+    --secondary-rgb: 251, 113, 133;
+    --bg-gradient-1: rgba(239, 68, 68, 0.22);
+    --bg-gradient-2: rgba(220, 38, 38, 0.16);
+    --bg-gradient-3: rgba(127, 29, 29, 0.1);
+}
+
+[data-guardrail-state="abuse"][data-abuse-level="2"] {
+    --primary: #dc2626;
+    --primary-dark: #991b1b;
+    --secondary: #f43f5e;
+    --primary-rgb: 220, 38, 38;
+    --secondary-rgb: 244, 63, 94;
+    --bg-gradient-1: rgba(220, 38, 38, 0.28);
+    --bg-gradient-2: rgba(185, 28, 28, 0.2);
+}
+
+[data-guardrail-state="abuse"][data-abuse-level="3"] {
+    --primary: #b91c1c;
+    --primary-dark: #7f1d1d;
+    --secondary: #ef4444;
+    --primary-rgb: 185, 28, 28;
+    --secondary-rgb: 239, 68, 68;
+    --bg-gradient-1: rgba(185, 28, 28, 0.34);
+    --bg-gradient-2: rgba(127, 29, 29, 0.24);
+}
+
+[data-guardrail-state="abuse"][data-abuse-level="4"] {
+    --primary: #991b1b;
+    --primary-dark: #641313;
+    --secondary: #dc2626;
+    --primary-rgb: 153, 27, 27;
+    --secondary-rgb: 220, 38, 38;
+    --bg-gradient-1: rgba(153, 27, 27, 0.4);
+    --bg-gradient-2: rgba(100, 19, 19, 0.3);
+}
+
+[data-guardrail-state="abuse"][data-abuse-level="5"] {
+    --primary: #7f1d1d;
+    --primary-dark: #450a0a;
+    --secondary: #b91c1c;
+    --primary-rgb: 127, 29, 29;
+    --secondary-rgb: 185, 28, 28;
+    --bg-gradient-1: rgba(127, 29, 29, 0.48);
+    --bg-gradient-2: rgba(69, 10, 10, 0.36);
+}
+
 /* ============================================
    全域基礎
    ============================================ */
@@ -397,6 +466,11 @@ body::before {
     z-index: 0;
     animation: gradientShift 15s ease-in-out infinite;
     transition: background var(--transition-normal);
+}
+
+@keyframes guardrailPulse {
+    0%, 100% { box-shadow: 0 8px 22px rgba(var(--primary-rgb), 0.16), inset 0 1px 0 rgba(var(--text-primary-rgb), 0.08); }
+    50% { box-shadow: 0 12px 30px rgba(var(--primary-rgb), 0.34), inset 0 1px 0 rgba(var(--text-primary-rgb), 0.12); }
 }
 
 @keyframes gradientShift {
@@ -645,6 +719,41 @@ body::after {
     font-size: 0.85rem;
     color: var(--text-secondary);
     font-weight: 500;
+}
+
+.guardrail-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(var(--primary-rgb), 0.35);
+    background: rgba(var(--bg-secondary-rgb), 0.62);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 8px 22px rgba(var(--primary-rgb), 0.16),
+    inset 0 1px 0 rgba(var(--text-primary-rgb), 0.08);
+    backdrop-filter: blur(12px);
+    transition: all var(--transition-normal);
+}
+
+.guardrail-status.abuse {
+    background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.28), rgba(var(--secondary-rgb), 0.14));
+    animation: guardrailPulse 1.8s ease-in-out infinite;
+}
+
+.guardrail-status.warning {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.28), rgba(250, 204, 21, 0.14));
+}
+
+.guardrail-level {
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: rgba(var(--primary-rgb), 0.22);
+    color: var(--text-primary);
+    font-size: 0.76rem;
 }
 
 .header h1:not(.title-card h1) {
