@@ -22,10 +22,10 @@ from transformers import (
 )
 
 # ===================== 路徑與常數 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
+DATA_PATH = Path("./clean.csv")
 OUT_DIR = Path("./backend_ml_ovr_transformer_models_clean")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
-MODEL_NAME = "bert-base-chinese"
+MODEL_NAME = "hfl/chinese-roberta-wwm-ext"
 
 # ===================== 可調參數 =====================
 SEED = 42

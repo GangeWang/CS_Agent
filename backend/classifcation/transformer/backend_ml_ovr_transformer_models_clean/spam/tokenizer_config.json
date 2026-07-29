@@ -1,11 +1,11 @@
 {
   "backend": "tokenizers",
   "cls_token": "[CLS]",
-  "do_lower_case": false,
+  "do_lower_case": true,
   "is_local": false,
   "local_files_only": false,
   "mask_token": "[MASK]",
-  "model_max_length": 512,
+  "model_max_length": 1000000000000000019884624838656,
   "pad_token": "[PAD]",
   "sep_token": "[SEP]",
   "strip_accents": null,

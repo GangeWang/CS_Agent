@@ -11,7 +11,7 @@
     "PROMPT_ATTACK": 0.3,
     "SPAM": 0.3
   },
-  "model_name": "bert-base-chinese",
+  "model_name": "hfl/chinese-roberta-wwm-ext",
   "max_len": 256,
   "model_dir": "backend_ml_ovr_transformer_models_clean",
   "note": "Threshold selected on VAL only; TEST used once for final report."

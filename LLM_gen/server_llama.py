@@ -40,38 +40,34 @@ except Exception as e:
     logger.exception("Failed to create Llama client: %s", e)
     llm = None
 
+
 def _sanitize_model_output(text: str) -> str:
     """
     清理模型可能帶出的內部標記/思考 (CoT) 等雜訊，嘗試取出最終可見的 assistant 回覆。
-    這是 heuristic，若未涵蓋新格式可再調整。
+    優先提取 final channel，嚴格過濾 analysis channel。
     """
     if not text:
         return text
 
-    # 把 bytes/非 str guard
     if not isinstance(text, str):
         text = str(text)
 
-    # 1) 優先匹配明確的 final 標記 (若模型輸出包含 <|start|>assistant...<|channel|>final<|message|>)
-    m = re.search(r"<\|start\|>assistant.*?<\|channel\|>final<\|message\|>(.*)$", text, flags=re.S)
+    # 1) 優先匹配明確的 final 標記，這是最可靠的方式
+    m = re.search(r"<\|start\|>assistant.*?<\|channel\|>final<\|message\|>(.+?)(?:<\|end\|>|<\|return\|>|$)", text,
+                  flags=re.S)
     if m:
-        out = m.group(1)
-        out = re.sub(r"<\|end\|>.*$", "", out, flags=re.S)
-        return out.strip()
+        out = m.group(1).strip()
+        if out:
+            return out
 
-    # 2) 移除 analysis channel 區塊
-    text = re.sub(r"<\|channel\|>analysis.*?<\|end\|>", "", text, flags=re.S)
+    # 2) 如果沒有 final 標記，完全移除所有 analysis channel
+    text = re.sub(r"<\|start\|>assistant.*?<\|channel\|>analysis.*?<\|end\|>", "", text, flags=re.S)
 
-    # 3) 移除其他常見內部標記
+    # 3) 移除其他內部標記
     text = re.sub(r"<\|start\|>|<\|end\|>|<\|return\|>", "", text, flags=re.S)
-    # 移除形如 "<|channel|>...<|message|>" 的內嵌標記
     text = re.sub(r"<\|channel\|>.*?<\|message\|>", "", text, flags=re.S)
 
-    # 4) 常見情況：如果有多段落，最後一段通常為最終回答，取最後非空段落
-    parts = [p.strip() for p in re.split(r"\n{2,}|\r\n{2,}", text) if p.strip()]
-    if parts:
-        return parts[-1]
-
+    # 4) 清理空白
     return text.strip()
 
 def _extract_text_from_chunk(chunk: Any, system_prompt: Optional[str] = None) -> Optional[str]:

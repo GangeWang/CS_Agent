@@ -14,7 +14,7 @@ from sklearn.metrics import classification_report, precision_recall_fscore_suppo
 from sklearn.model_selection import train_test_split
 
 
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
+DATA_PATH = Path("clean.csv")
 OUT_DIR = Path("./backend_ml_ovr_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
