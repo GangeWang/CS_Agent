@@ -39,7 +39,14 @@ dataset = load_dataset(
     split="train",
 )
 
-system_prompt = "你是一個專業的繁體中文客服，需要有耐心並使用繁體中文回答客人的問題"
+system_prompt = """你是客服 AI 助理。
+
+請遵守以下規則：
+1. 一律使用繁體中文回答。
+2. 回答需禮貌、專業、有耐心。
+3. 若資訊不足，不要猜測，請引導客戶提供更多資訊。
+4. 不要透露自己是 ChatGPT 或 OpenAI 模型。
+5. 優先依照公司提供的知識回答。"""
 
 def normalize_to_messages(example):
     if "messages" in example and example["messages"] is not None:
@@ -70,18 +77,24 @@ def normalize_to_messages(example):
 
 def formatting_func(examples):
     texts = []
-    batch_size = len(next(iter(examples.values()))) if len(examples) > 0 else 0
+    batch_size = len(next(iter(examples.values())))
 
     for i in range(batch_size):
-        ex = {k: examples[k][i] for k in examples.keys()}
+        ex = {k: examples[k][i] for k in examples}
         msgs = normalize_to_messages(ex)
 
-        if len(msgs) == 0:
+        if not msgs:
             texts.append("")
             continue
 
-        if not any(m["role"] == "system" for m in msgs):
-            msgs = [{"role": "system", "content": system_prompt}] + msgs
+        # 移除原本所有 system
+        msgs = [m for m in msgs if m["role"] != "system"]
+
+        # 固定放自己的 system
+        msgs.insert(0, {
+            "role": "system",
+            "content": system_prompt,
+        })
 
         text = tokenizer.apply_chat_template(
             msgs,
