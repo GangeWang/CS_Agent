@@ -237,7 +237,8 @@ async def ws_chat(websocket: WebSocket) -> None:
             idle_warning_sent = False
 
             # ---- guardrail ----
-            guardrail_label = classify_text(user_msg).get("label", "NORMAL")
+            # classify_text 內含 transformer 推論（同步），放到執行緒池避免阻塞 event loop
+            guardrail_label = (await asyncio.to_thread(classify_text, user_msg)).get("label", "NORMAL")
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
             # Keep your existing "guardrail" event (front-end should NOT render it as bubble)

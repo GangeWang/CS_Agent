@@ -109,7 +109,7 @@ def _build_effective_system_prompt(conversation_history: Optional[list[dict]]) -
 
 
 def _debug(*args) -> None:
-    if getattr(settings, "ollama_debug", False):
+    if getattr(settings, "llama_debug", False):
         logger.debug(" ".join(str(arg) for arg in args))
 
 

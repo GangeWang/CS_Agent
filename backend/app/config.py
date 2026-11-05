@@ -30,10 +30,8 @@ class Settings(BaseSettings):
     context_window_keep_recent_messages: int = 8
     context_summary_target_chars: int = 1200
 
-    # For backward compatibility (some modules may still reference ollama_*)
-    ollama_url: str | None = None
-    ollama_model: str | None = None
-    ollama_debug: bool = False
+    # 推理服務 debug 訊號（streamer 的 _debug 會讀取）
+    llama_debug: bool = False
 
     # WebSocket Configuration
     max_message_size: int = 10 * 1024  # 10KB
