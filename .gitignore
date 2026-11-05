@@ -50,3 +50,6 @@ htmlcov/
 
 # Node modules (for frontend)
 node_modules/
+
+# Docker：host 端模型放置目錄（GGUF 等，volume 掛載用）
+/models/

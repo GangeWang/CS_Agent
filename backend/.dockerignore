@@ -1,0 +1,11 @@
+# 保持 build context 輕量：模型/資料由 compose volume 掛載，不進 image
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+*.md
+tests_smoke.py
+classifcation/
+semantic_models/
+app/data/
