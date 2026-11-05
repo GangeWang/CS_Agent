@@ -2,6 +2,7 @@
 *.gguf
 *.bin
 *.safetensors
+*.whl
 
 # python
 __pycache__/

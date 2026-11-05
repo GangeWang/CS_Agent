@@ -7,8 +7,10 @@ from sentence_transformers import SentenceTransformer
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
 # 你的原始資料檔（每行: 句子,標籤）
-RAW_PATH = Path("classifcation/ML_data.csv")
-MODEL_DIR = Path("semantic_models")
+# 路徑改為相對於本腳本位置，從任何工作目錄執行皆可
+_HERE = Path(__file__).resolve().parent
+RAW_PATH = _HERE / "data_set" / "ML_data.csv"
+MODEL_DIR = _HERE.parent / "semantic_models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # 讀取兩欄: text,label
