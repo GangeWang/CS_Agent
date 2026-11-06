@@ -1,4 +1,4 @@
-# CS_Agent 全棧編排：推理服務（GPU）+ 後端（FastAPI + guardrail）
+# CS_Agent 全棧編排：前端（nginx）+ 後端（FastAPI + guardrail）+ 推理服務（GPU）
 #
 # 使用前：
 #   1) 把 GGUF 模型放到 ./models/CS_AgentV12.gguf，或以環境變數覆蓋：
@@ -8,7 +8,12 @@
 # 驗證：
 #   docker compose ps
 #   curl http://localhost:8000/health          # 期待 llama: connected
-#   前端（Front/）目前未容器化，開發時照舊 npm run dev 指向 localhost:8000
+#   瀏覽器開 http://localhost:8080             # 前端；WS 走同源由 nginx 反代
+#
+# 埠對外：
+#   front      8080  （SPA + /ws/chat 反代 + /health 便利用）
+#   backend    8000  （直連除錯用；正式環境可移除，瀏覽器流量走 front）
+#   inference  10000 （僅綁 127.0.0.1，容器間走內部網路）
 
 services:
   inference:
@@ -54,6 +59,15 @@ services:
       - "8000:8000"
     depends_on:
       - inference
+
+  front:
+    build: ./Front
+    image: cs-agent/front:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
 
 volumes:
   hf-cache:

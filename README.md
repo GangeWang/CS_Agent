@@ -95,12 +95,42 @@ npm run dev
 前端預設連線到：
 
 ```text
-ws://<目前網頁主機>:8000/ws/chat
+ws://<目前網頁主機>:<頁面埠>/ws/chat    # 開發模式由 vite proxy 轉發到 localhost:8000
 ```
 
 ### 3) （選用）啟動 LLM 服務
 
 若需要本地 llama.cpp 服務，可參考 `LLM_gen/README.md`。
+
+### Docker 部署（一鍵全棧：前端 + 後端 + 推理）
+
+```bash
+# GGUF 模型不在 ./models/ 時，以環境變數指定實際路徑
+export LLAMA_MODEL_FILE=/path/to/CS_AgentV12.gguf   # PowerShell: $env:LLAMA_MODEL_FILE="E:\CS_Agent\LLM_gen\CS_AgentV12.gguf"
+docker compose up -d --build
+```
+
+三個服務：
+
+| 服務 | 對外埠 | 說明 |
+|---|---|---|
+| `front` | `8080` | React SPA（nginx 靜態）；`/ws/chat`、`/health` 同源反代到 backend |
+| `backend` | `8000` | FastAPI + guardrail（直連除錯用；正式環境可移除） |
+| `inference` | `127.0.0.1:10000` | llama.cpp（GGUF 全層進 GPU），僅本機可達 |
+
+驗證：
+
+```bash
+docker compose ps
+curl http://localhost:8000/health   # {"status":"ok","llama":"connected"}
+# 瀏覽器開 http://localhost:8080 直接對話
+```
+
+- 模型與資料一律 volume 掛載（GGUF、guardrail 模型、語意庫、RAG），重訓免重建 image
+- `docker compose down` 保留 `hf-cache` volume；`down -v` 才會清
+- 對話 session 在進程記憶體（TTLCache），勿開多 replica
+- 需要改對外埠：改 `docker-compose.yml` 的 ports 即可，前端 WS 走同源、不需重 build image
+- 特殊部署：仍可用 `VITE_WS_URL` / `VITE_WS_PORT` build 時覆蓋 WS 位址
 
 ---
 

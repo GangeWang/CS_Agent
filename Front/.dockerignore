@@ -1,0 +1,7 @@
+# 建置 context 排除：依賴與產物由容器內自己產生
+node_modules
+dist
+.git
+*.md
+.eslintignore
+eslint.config.js
