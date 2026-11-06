@@ -31,11 +31,13 @@ N_CTX = int(os.environ.get("LLAMA_N_CTX", "2048"))
 N_GPU_LAYERS = int(os.environ.get("LLAMA_N_GPU_LAYERS", "32"))
 N_THREADS = int(os.environ.get("LLAMA_N_THREADS", "4"))
 API_KEY = os.environ.get("LLAMA_API_KEY", None)
+# KV cache 位置：true（預設）= 進 VRAM（快）；false = 留系統 RAM（可開超大 n_ctx，速度較慢）
+OFFLOAD_KV = os.environ.get("LLAMA_OFFLOAD_KV", "true").strip().lower() in ("1", "true", "yes", "on")
 
 # instantiate Llama client
 try:
-    llm = Llama(model_path=MODEL_PATH, n_ctx=N_CTX, n_gpu_layers=N_GPU_LAYERS, n_threads=N_THREADS)
-    logger.info("Llama client created (model_path=%s, n_gpu_layers=%s)", MODEL_PATH, N_GPU_LAYERS)
+    llm = Llama(model_path=MODEL_PATH, n_ctx=N_CTX, n_gpu_layers=N_GPU_LAYERS, n_threads=N_THREADS, offload_kqv=OFFLOAD_KV)
+    logger.info("Llama client created (model_path=%s, n_gpu_layers=%s, n_ctx=%d, offload_kqv=%s)", MODEL_PATH, N_GPU_LAYERS, N_CTX, OFFLOAD_KV)
 except Exception as e:
     logger.exception("Failed to create Llama client: %s", e)
     llm = None

@@ -23,7 +23,8 @@ services:
     environment:
       LLAMA_MODEL_PATH: /models/CS_AgentV12.gguf
       LLAMA_N_GPU_LAYERS: "-1"        # 全部層進 GPU
-      LLAMA_N_CTX: "8192"
+      LLAMA_N_CTX: "131072"           # 128K；KV cache 走系統 RAM（offload_kqv=false）才裝得下
+      LLAMA_OFFLOAD_KV: "false"       # KV cache 留 RAM：128K KV ≈ 3GB，16GB VRAM 卡放不下
       # LLAMA_API_KEY: ""             # 有需要再開
       # LLAMA_MAX_CONCURRENT: "1"
     volumes:
