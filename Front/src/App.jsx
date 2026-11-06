@@ -19,9 +19,13 @@ const katexAllowed = {
     }
 }
 
-const WS_PORT = import.meta.env.VITE_WS_PORT || '8000'
+// WS 位址：VITE_WS_URL 直接覆蓋 > VITE_WS_PORT 指定埠 > 同源（window.location.host）。
+// 同源預設讓容器化部署（nginx 反代 /ws/chat）與開發模式（vite proxy）都不用改碼。
+const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws'
 const WS_URL = import.meta.env.VITE_WS_URL
-    || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:${WS_PORT}/ws/chat`
+    || (import.meta.env.VITE_WS_PORT
+        ? `${wsProto}://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}/ws/chat`
+        : `${wsProto}://${window.location.host}/ws/chat`)
 
 const THEMES = ['dark', 'light', 'pink', 'red', 'yellow', 'orange', 'brown', 'gray', 'blue', 'green', 'purple']
 const THEME_NAMES = {
