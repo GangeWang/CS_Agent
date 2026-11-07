@@ -232,3 +232,15 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 - 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
 - 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
 - 完整實驗結果與選型理由見本檔上方各方法 Classification Report
+
+---
+
+## 六種分類方式矩陣（3 演算法 × 2 架構）
+
+| | 4選1（單模型多分類，LabelEncoder/num_classes 動態） | OVR（4 個二元分類器，每 label 一個模型） |
+|---|---|---|
+| **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib`（吃 clean.csv） | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
+| **BiLSTM** | `BILSTM/train_multiclass_bilstm.py` → 單一 .pt + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
+| **Transformer** | `transformer/train_multiclass_transformer_legacy.py`（augmented 資料世代實驗） | `transformer/train_ovr_transformer.py`（吃 clean.csv）→ `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+
+> 命名對照歷史：原 `BILSTM.py` = multiclass（非 binary）；原 `transformer.py` = multiclass 實驗版；原 `binary_transformer.py` = 上線 OVR 訓練腳本（「binary」指每個二元分類器）。
