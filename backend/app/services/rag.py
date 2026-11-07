@@ -157,9 +157,3 @@ def retrieve_rag_hit(user_query: str, *, min_score: int = 3) -> RagHit | None:
         return RagHit(answer=best_answer, score=best_score, matched_question=best_question)
 
     return None
-
-
-def retrieve_rag_answer(user_query: str) -> str | None:
-    """Backward-compatible API."""
-    hit = retrieve_rag_hit(user_query)
-    return hit.answer if hit else None

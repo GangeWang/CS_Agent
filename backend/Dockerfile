@@ -14,9 +14,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# 先裝 CPU 版 torch，再裝其餘依賴（transformers 系偵測到 torch 已存在即不會重裝）
+# 先裝 CPU 版 torch（與 requirements.txt 鎖定版本一致，避免 pip 再去 PyPI 抓 526MB CUDA wheel），
+# 再裝其餘依賴（transformers 系偵測到 torch 已存在即不會重裝）
 COPY requirements.txt .
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir -r requirements.txt
 
 # 應用程式碼；classifcation（guardrail 模型）、semantic_models、app/data（rag_db）

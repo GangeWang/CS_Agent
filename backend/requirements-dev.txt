@@ -1,0 +1,2 @@
+# 測試依賴（開發用）：pip install -r requirements-dev.txt
+pytest==9.2.0

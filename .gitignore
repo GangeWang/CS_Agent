@@ -1,5 +1,6 @@
-backend/classifcation/transformer/backend_ml_guardrail_transformer/checkpoints/
-# --- 模型 binary 入庫（LFS）；僅 checkpoints 訓練中間態排除 ---
+# 訓練 checkpoints（所有分類模型目錄的訓練中間態一律不入庫）
+**/checkpoints/
+# --- 模型 binary 入庫（LFS）---
 # Python
 __pycache__/
 *.py[cod]

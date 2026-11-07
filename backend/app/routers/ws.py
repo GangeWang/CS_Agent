@@ -1,10 +1,10 @@
 """
 WebSocket router for real-time chat with conversation memory.
-Handles streaming responses from Ollama and maintains conversation history.
+Streams responses from the configured LLM inference service (llama.cpp server).
 
 Rules (IMPORTANT for UI safety):
 - Only stream chunk types: delta / done / error to the client.
-- All debug/traces are printed/logged on the backend (NOT sent to WS).
+- All debug/traces are logged on the backend (NOT sent to WS).
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import functools
 import json
 import logging
 import math
+import uuid
 from collections import deque
 from typing import Dict, List
 from urllib.parse import urlparse
@@ -35,8 +36,6 @@ conversation_sessions: TTLCache = TTLCache(maxsize=1000, ttl=3600)
 
 IDLE_TIMEOUT_SECONDS = 180
 IDLE_WARNING_SECONDS_BEFORE_END = 60
-
-ABUSIVE_COOLDOWN_NOTICE = ""
 
 # Only these chunk types are allowed to reach the browser UI.
 ALLOWED_STREAM_TYPES = {"delta", "done", "error"}
@@ -94,8 +93,7 @@ def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str)
 
 
 def _build_guardrail_instruction(label: str) -> str:
-    print(label)
-    print("LLAMA URL =", settings.llama_api_url)
+    logger.debug("Guardrail label=%s for instruction building", label)
     if label == "ABUSIVE":
         return (
             "[GuardrailLabel=ABUSIVE]\n"
@@ -210,7 +208,8 @@ async def ws_chat(websocket: WebSocket) -> None:
     await websocket.accept()
     loop = asyncio.get_event_loop()
 
-    session_id = id(websocket)
+    # uuid 取代 id(websocket)：日誌可追蹤，且不受物件位址重用影響
+    session_id = uuid.uuid4().hex
     conversation_sessions[session_id] = []
 
     last_dialogue_at = loop.time()
@@ -223,7 +222,8 @@ async def ws_chat(websocket: WebSocket) -> None:
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
         summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
-        logger.info("Conversation summary session_id=%s reason=%s summary=%s", session_id, reason, summary)
+        # 摘要含對話內容（可能含 PII）：log 只留前 300 字供排查，完整內容不進日誌
+        logger.info("Conversation summary session_id=%s reason=%s summary=%s", session_id, reason, summary[:300])
 
         # 回傳真實摘要內容（前端會渲染此訊息）；摘要失敗時給 fallback 文案
         await websocket.send_text(json_dumps({
@@ -386,11 +386,6 @@ async def ws_chat(websocket: WebSocket) -> None:
 
                 q: asyncio.Queue = asyncio.Queue()
                 assistant_response: List[str] = []
-
-                if guardrail_label == "ABUSIVE":
-                    prefix = ABUSIVE_COOLDOWN_NOTICE + "\n\n"
-                    assistant_response.append(prefix)
-                    await websocket.send_text(json_dumps({"type": "delta", "text": prefix}))
 
                 def on_chunk(chunk: dict) -> None:
                     """

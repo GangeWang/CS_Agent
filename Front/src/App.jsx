@@ -5,9 +5,10 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeSanitize from 'rehype-sanitize'
 import { defaultSchema } from 'hast-util-sanitize'
-import DOMPurify from 'dompurify'
 import 'katex/dist/katex.min.css'
 
+// 白名單式清理（rehype-sanitize）：在 KaTeX 之後執行，是唯一的 HTML 防線。
+// span/div 需放行 class 與 style：KaTeX 排版依賴 inline style（高度/垂直對齊/間距）。
 const katexAllowed = {
     ...defaultSchema,
     attributes: {
@@ -124,8 +125,8 @@ function MarkdownViewer({ source, isInitial = false }) {
     }, [source, isInitial])
 
     const safeSource = typeof (displayText || source) === 'string'
-        ? DOMPurify.sanitize(displayText || source)
-        : (displayText || source)
+        ? (displayText || source)
+        : ''
 
     return (
         <ReactMarkdown
@@ -203,6 +204,7 @@ export default function App() {
     const wsRef = useRef(null)
     const pendingAssistantId = useRef(null)
     const reconnectAttempts = useRef(0)
+    const reconnectTimerRef = useRef(null)
     const heartbeatRef = useRef({ timer: null, missed: 0 })
     const bufferRef = useRef('')
     const flushTimerRef = useRef(null)
@@ -331,7 +333,8 @@ export default function App() {
     function scheduleReconnect(url = WS_URL) {
         reconnectAttempts.current = Math.min(10, reconnectAttempts.current + 1)
         const delay = Math.min(30000, 200 * (2 ** reconnectAttempts.current))
-        setTimeout(() => connectWs(url), delay)
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = setTimeout(() => connectWs(url), delay)
     }
 
     // ===== 訊息 Buffer =====
@@ -502,11 +505,11 @@ export default function App() {
             }
 
             const ws = wsRef.current
+            // user_info（姓名/電話）不隨訊息送出：後端未使用，避免 PII 不必要傳輸（資料最小化）
             const payload = {
                 model: 'CS_AgentV12',
                 messages: [{ role: 'user', content: trimmed }],
-                mode: isAgentMode ? 'agent' : 'chat',
-                user_info: userProfile
+                mode: isAgentMode ? 'agent' : 'chat'
             }
             ws.send(JSON.stringify(payload))
         } catch (err) {
@@ -552,6 +555,10 @@ export default function App() {
                 if (wsRef.current) wsRef.current.close()
             } catch (e) {
                 console.debug('[cleanup] ws error', e)
+            }
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current)
+                reconnectTimerRef.current = null
             }
             stopHeartbeat()
             clearFlushTimer()

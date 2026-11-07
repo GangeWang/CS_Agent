@@ -16,7 +16,7 @@ from app.config import settings
 # 後端入口檔（main.py）角色：
 # 1) 初始化 FastAPI 應用
 # 2) 掛載 CORS 中介層，讓前端可跨網域呼叫
-# 3) 提供 /health 健康檢查（含 Ollama 連線檢測）
+# 3) 提供 /health 健康檢查（含推理服務與 guardrail 狀態）
 # 4) 掛載 WebSocket 路由 /ws/chat
 
 # Configure logging
@@ -26,9 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 啟動預熱時讓模型常駐記憶體的時間；可依部署資源與流量型態調整。
-OLLAMA_WARMUP_KEEP_ALIVE = "30m"
-OLLAMA_WARMUP_PROMPT = "warmup"
 GUARDRAIL_WARMUP_TEXT = "系統啟動預熱"
 
 
@@ -50,10 +47,7 @@ async def _warmup_guardrail_model() -> None:
 
 
 async def _warmup_llama_model() -> None:
-    """
-    啟動時嘗試 ping WSL 上的 LLAMA 推理服務，確認模型已載入。
-    此函式名稱保留以兼容既有程式，但內部改為呼叫 settings.llama_api_url
-    """
+    """啟動時 ping 推理服務（settings.llama_api_url），確認模型已載入。"""
     endpoint = settings.llama_api_url.rstrip("/") + "/health"
     try:
         timeout = httpx.Timeout(
@@ -77,7 +71,7 @@ async def lifespan(_: FastAPI):
 
     預熱內容：
     - Guardrail 分類模型與語意資源
-    - Ollama 聊天模型
+    - LLM 推理服務連線檢查
 
     行為原則：
     - 預熱是最佳化步驟，不是啟動必要條件
@@ -107,7 +101,7 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     """
-    Health check endpoint：確認 API 本體、LLAMA 推理服務與 guardrail 模型狀態。
+    Health check endpoint：確認 API 本體、LLM 推理服務與 guardrail 模型狀態。
 
     錯誤細節只進 log，回應不攜帶 exception 字串（避免內部資訊外洩）。
     Returns:
@@ -133,4 +127,4 @@ async def health():
 
 # WebSocket 路由
 app.include_router(ws_router)
-print("LLAMA URL =", settings.llama_api_url)
+logger.info("LLM inference URL: %s", settings.llama_api_url)
