@@ -1,3 +1,5 @@
+backend/classifcation/transformer/backend_ml_guardrail_transformer/checkpoints/
+# --- 模型 binary 入庫（LFS）；僅 checkpoints 訓練中間態排除 ---
 # Python
 __pycache__/
 *.py[cod]
@@ -55,14 +57,7 @@ node_modules/
 /models/
 
 # --- 分類模型：腳本/資料集/最終模型/README 入庫；中間產物不入庫 ---
-backend/classifcation/BILSTM/backend_ml_guardrail_bilstm_pytorch.pt
-backend/classifcation/BILSTM/backend_ml_guardrail_label_encoder.joblib
-backend/classifcation/BILSTM/backend_ml_guardrail_vocab.joblib
-backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/**/*.pt
 backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/vocab.joblib
-backend/classifcation/ML/backend_ml_guardrail_model.joblib
-backend/classifcation/ML/backend_ml_ovr_models/*.joblib
-backend/classifcation/transformer/backend_ml_guardrail_transformer/
 backend/classifcation/transformer/backend_ml_ovr_transformer_models_clean/**/training_args.bin
 LLM_gen/model_train/outputs/
 LLM_gen/*.whl

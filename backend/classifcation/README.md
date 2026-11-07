@@ -244,3 +244,8 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 | **Transformer** | `transformer/train_multiclass_transformer_legacy.py`（augmented 資料世代實驗） | `transformer/train_ovr_transformer.py`（吃 clean.csv）→ `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
 
 > 命名對照歷史：原 `BILSTM.py` = multiclass（非 binary）；原 `transformer.py` = multiclass 實驗版；原 `binary_transformer.py` = 上線 OVR 訓練腳本（「binary」指每個二元分類器）。
+
+### 模型 binary 入庫政策（2026-11-07 更新）
+
+六套模型的 binary **全部以 Git LFS 入庫**（含非上線五套，供對照與回滾）；
+僅 `transformer/backend_ml_guardrail_transformer/checkpoints/`（訓練中間態）排除。
