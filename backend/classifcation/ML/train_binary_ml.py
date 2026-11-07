@@ -14,7 +14,7 @@ from sklearn.metrics import classification_report, precision_recall_fscore_suppo
 from sklearn.model_selection import train_test_split
 
 
-DATA_PATH = Path("clean.csv")
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 OUT_DIR = Path("./backend_ml_ovr_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
@@ -72,8 +72,9 @@ def main():
     print("Label distribution:")
     print(df["label"].value_counts())
 
-    X = df["text"].values
-    y = df["label"].values
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y

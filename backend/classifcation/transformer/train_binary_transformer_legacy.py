@@ -22,16 +22,16 @@ from transformers import (
 )
 
 # ===================== 路徑與常數 =====================
-DATA_PATH = Path("./clean.csv")
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 OUT_DIR = Path("./backend_ml_ovr_transformer_models_clean")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 MODEL_NAME = "hfl/chinese-roberta-wwm-ext"
 
 # ===================== 可調參數 =====================
 SEED = 42
-MAX_LEN = 256
-BATCH_SIZE = 16
-EPOCHS = 5
+MAX_LEN = 512
+BATCH_SIZE = 32
+EPOCHS = 3
 LR = 2e-5
 WEIGHT_DECAY = 0.01
 
@@ -135,6 +135,7 @@ def train_one_binary(
         report_to="none",
         fp16=torch.cuda.is_available(),
         seed=SEED,
+        disable_tqdm=True
     )
 
     trainer = Trainer(
@@ -183,12 +184,15 @@ def main():
     print(df["label"].value_counts())
 
     # 先切分（防止全資料先去重造成洩漏偏樂觀）
-    X = df["text"].values
-    y = df["label"].values
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     X_train_full, X_test, y_train_full, y_test = train_test_split(
         X, y, test_size=0.2, random_state=SEED, stratify=y
     )
+
+
     X_train, X_val, y_train, y_val = train_test_split(
         X_train_full, y_train_full, test_size=0.1, random_state=SEED, stratify=y_train_full
     )

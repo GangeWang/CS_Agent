@@ -22,7 +22,7 @@ from transformers import (
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 OUTPUT_DIR = Path("backend_ml_guardrail_transformer")  # 存模型與tokenizer
 LABEL_ENCODER_PATH = OUTPUT_DIR / "label_encoder.joblib"
 
@@ -102,8 +102,9 @@ def main():
     print("Label distribution:")
     print(df["label"].value_counts())
 
-    X = df["text"].tolist()
-    y = df["label"].tolist()
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     # label encode
     le = LabelEncoder()
@@ -152,7 +153,8 @@ def main():
         save_total_limit=2,
         report_to="none",
         fp16=torch.cuda.is_available(),
-        seed=SEED
+        seed=SEED,
+        disable_tqdm = True
     )
 
     from transformers import DataCollatorWithPadding

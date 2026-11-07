@@ -10,7 +10,7 @@ from sklearn.metrics import classification_report    # 用於評估模型表現
 
 
 # 指定資料與模型儲存的路徑
-DATA_PATH = Path("clean.csv")  # CSV 資料路徑
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 MODEL_PATH = Path("backend_ml_guardrail_model.joblib")           # 模型儲存路徑
 
 
@@ -55,8 +55,9 @@ def main():
     print(df["label"].value_counts())
 
     # ===================== 建立特徵與標籤 =====================
-    X = df["text"]  # 文字資料
-    y = df["label"] # 對應標籤
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     # 將資料拆分成訓練集與測試集
     # test_size=0.2 -> 20% 作為測試集

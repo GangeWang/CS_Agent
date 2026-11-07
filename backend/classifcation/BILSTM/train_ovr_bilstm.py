@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 OUT_DIR = Path("./backend_ml_ovr_bilstm_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
@@ -265,8 +265,9 @@ def main():
     print("Label distribution:")
     print(df["label"].value_counts())
 
-    X = df["text"].values
-    y = df["label"].values
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     # 先切分，避免洩漏偏樂觀
     X_train_full, X_test, y_train_full, y_test = train_test_split(

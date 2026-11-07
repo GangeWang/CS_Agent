@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("backend_ml_data_guardrail_augmented_big_v2_5000.csv")
+DATA_PATH = Path("./data_set/train_full_dataset.csv")
 MODEL_PATH = Path("backend_ml_guardrail_bilstm_pytorch.pt")
 TOKENIZER_PATH = Path("backend_ml_guardrail_vocab.joblib")
 LABEL_ENCODER_PATH = Path("backend_ml_guardrail_label_encoder.joblib")
@@ -161,8 +161,9 @@ def main():
     print("Label distribution:")
     print(df["label"].value_counts())
 
-    X = df["text"].tolist()
-    y = df["label"].tolist()
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
 
     # label encode
     le = LabelEncoder()
