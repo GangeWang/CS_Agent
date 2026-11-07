@@ -12,7 +12,6 @@ import os
 
 import numpy as np
 import torch
-from sentence_transformers.util import semantic_search
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from sentence_transformers import SentenceTransformer
 
@@ -83,7 +82,8 @@ WHITELIST_DOMAINS = {
 }
 
 PROMPT_ATTACK_RULES = [
-    r"ignore (all|previous) instructions",
+    # 例：ignore all instructions / ignore previous instructions / ignore all previous instructions
+    r"ignore\s+(all\s+|previous\s+|your\s+|these\s+)*instructions",
     r"reveal (your|the) system prompt",
     r"system prompt",
     r"developer message",

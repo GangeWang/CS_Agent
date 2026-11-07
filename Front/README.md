@@ -12,9 +12,7 @@
 - **react-markdown**：Markdown 內容渲染。
 - **remark-gfm / remark-math**：GFM 與數學式語法支援。
 - **rehype-katex**：KaTeX 數學公式排版。
-- **rehype-highlight + highlight.js**：程式碼區塊語法高亮。
-- **rehype-raw + rehype-sanitize**：受控 HTML 解析與安全白名單。
-- **DOMPurify**：前端輸入/輸出雙層清理，避免 XSS。
+- **rehype-sanitize**：白名單式 HTML 清理（在 KaTeX 之後執行），避免 XSS；使用者訊息以純文字渲染。
 
 ---
 
