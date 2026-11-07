@@ -1,37 +1,37 @@
+from __future__ import annotations
 from pathlib import Path
+from typing import Dict, Tuple
+import json
 import random
 import numpy as np
 import pandas as pd
-import joblib
 
+from sklearn.metrics import classification_report, precision_recall_fscore_support
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report
 
 import torch
 from torch.utils.data import Dataset
-
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
     EarlyStoppingCallback,
-    set_seed as hf_set_seed
+    DataCollatorWithPadding,
+    set_seed as hf_set_seed,
 )
 
-
-# ===================== 路徑設定 =====================
+# ===================== 路徑與常數 =====================
 DATA_PATH = Path("./data_set/train_full_dataset.csv")
-OUTPUT_DIR = Path("backend_ml_guardrail_transformer")  # 存模型與tokenizer
-LABEL_ENCODER_PATH = OUTPUT_DIR / "label_encoder.joblib"
+OUT_DIR = Path("./backend_ml_ovr_transformer_models_clean")
+LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
+MODEL_NAME = "hfl/chinese-roberta-wwm-ext"
 
 # ===================== 可調參數 =====================
 SEED = 42
-MODEL_NAME = "bert-base-chinese"   # 中文建議；多語可改 xlm-roberta-base
-MAX_LEN = 256
-BATCH_SIZE = 16
-EPOCHS = 5
+MAX_LEN = 512
+BATCH_SIZE = 32
+EPOCHS = 3
 LR = 2e-5
 WEIGHT_DECAY = 0.01
 
@@ -44,10 +44,10 @@ def set_seed(seed=42):
     hf_set_seed(seed)
 
 
-class GuardrailDataset(Dataset):
+class BinaryTextDataset(Dataset):
     def __init__(self, texts, labels, tokenizer, max_len):
-        self.texts = texts
-        self.labels = labels
+        self.texts = list(texts)
+        self.labels = list(labels)
         self.tokenizer = tokenizer
         self.max_len = max_len
 
@@ -61,11 +61,10 @@ class GuardrailDataset(Dataset):
         enc = self.tokenizer(
             text,
             truncation=True,
-            padding="max_length",
             max_length=self.max_len,
-            return_tensors="pt"
+            padding=False,
+            return_tensors="pt",
         )
-
         item = {k: v.squeeze(0) for k, v in enc.items()}
         item["labels"] = torch.tensor(label, dtype=torch.long)
         return item
@@ -78,66 +77,48 @@ def compute_metrics(eval_pred):
     return {"accuracy": float(acc)}
 
 
-def main():
-    set_seed(SEED)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print("Using device:", device)
-
-    if not DATA_PATH.exists():
-        raise FileNotFoundError(f"DATA_PATH not found: {DATA_PATH.resolve()}")
-
-    df = pd.read_csv(DATA_PATH)
-    required_cols = {"text", "label"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"CSV must contain columns: {required_cols}, got: {list(df.columns)}")
-
-    # ===================== 資料清理 =====================
-    df = df.dropna(subset=["text", "label"]).copy()
-    df["text"] = df["text"].astype(str).str.strip()
-    df["label"] = df["label"].astype(str).str.strip()
-    df = df[df["text"] != ""]
-    df = df.drop_duplicates(subset=["text", "label"]).reset_index(drop=True)
-
-    print(f"Loaded rows: {len(df)}")
-    print("Label distribution:")
-    print(df["label"].value_counts())
-
-    X = df["text"].astype(str).to_numpy(dtype=object)
-    y = df["label"].astype(str).to_numpy(dtype=object)
+def find_best_threshold_on_val(y_true_bin: np.ndarray, y_prob: np.ndarray) -> float:
+    best_t, best_f1 = 0.5, -1.0
+    for t in np.arange(0.30, 0.91, 0.02):
+        y_pred = (y_prob >= t).astype(int)
+        _, _, f1, _ = precision_recall_fscore_support(
+            y_true_bin, y_pred, average="binary", zero_division=0
+        )
+        if f1 > best_f1:
+            best_f1 = f1
+            best_t = float(round(t, 2))
+    return best_t
 
 
-    # label encode
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(y)
-    num_classes = len(le.classes_)
-    print(f"Num classes: {num_classes}, classes={list(le.classes_)}")
+def predict_pos_prob(trainer: Trainer, ds: Dataset) -> np.ndarray:
+    pred_output = trainer.predict(ds)
+    logits = pred_output.predictions
+    probs = torch.softmax(torch.tensor(logits), dim=1).numpy()[:, 1]
+    return probs
 
-    # train/test split
-    X_train_text, X_test_text, y_train, y_test = train_test_split(
-        X, y_encoded, test_size=0.2, random_state=SEED, stratify=y_encoded
-    )
 
-    # 再從 train 切一份 validation
-    X_train_text, X_val_text, y_train, y_val = train_test_split(
-        X_train_text, y_train, test_size=0.1, random_state=SEED, stratify=y_train
-    )
+def train_one_binary(
+    target_label: str,
+    tokenizer,
+    X_train, y_train_bin,
+    X_val, y_val_bin,
+    X_test, y_test_bin,
+) -> Tuple[float, str]:
+    print("\n" + "=" * 72)
+    print(f"Training: {target_label} vs NOT_{target_label}")
 
-    # tokenizer / model
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME,
-        num_labels=num_classes
-    )
+    model_out_dir = OUT_DIR / target_label.lower()
+    ckpt_dir = model_out_dir / "checkpoints"
+    model_out_dir.mkdir(parents=True, exist_ok=True)
 
-    train_ds = GuardrailDataset(X_train_text, y_train, tokenizer, MAX_LEN)
-    val_ds = GuardrailDataset(X_val_text, y_val, tokenizer, MAX_LEN)
-    test_ds = GuardrailDataset(X_test_text, y_test, tokenizer, MAX_LEN)
+    train_ds = BinaryTextDataset(X_train, y_train_bin, tokenizer, MAX_LEN)
+    val_ds = BinaryTextDataset(X_val, y_val_bin, tokenizer, MAX_LEN)
+    test_ds = BinaryTextDataset(X_test, y_test_bin, tokenizer, MAX_LEN)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=2)
 
-    # HuggingFace Trainer 參數
     args = TrainingArguments(
-        output_dir=str(OUTPUT_DIR / "checkpoints"),
+        output_dir=str(ckpt_dir),
         eval_strategy="epoch",
         save_strategy="epoch",
         logging_strategy="steps",
@@ -154,44 +135,115 @@ def main():
         report_to="none",
         fp16=torch.cuda.is_available(),
         seed=SEED,
-        disable_tqdm = True
+        disable_tqdm=True
     )
-
-    from transformers import DataCollatorWithPadding
-
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     trainer = Trainer(
         model=model,
         args=args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        data_collator=data_collator,
+        data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
         compute_metrics=compute_metrics,
-        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)]
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
-    # ===================== 訓練 =====================
+
     trainer.train()
 
-    # ===================== 測試評估 =====================
-    pred_output = trainer.predict(test_ds)
-    y_pred = np.argmax(pred_output.predictions, axis=1)
+    # 1) 在 val 找 threshold
+    val_prob = predict_pos_prob(trainer, val_ds)
+    best_t = find_best_threshold_on_val(np.array(y_val_bin), val_prob)
 
-    print("\n=== Classification Report ===")
-    print(classification_report(
-        y_test, y_pred,
-        target_names=le.classes_,
-        digits=4, zero_division=0
-    ))
+    # 2) 在 test 固定該 threshold 做最終評估
+    test_prob = predict_pos_prob(trainer, test_ds)
+    y_pred = (test_prob >= best_t).astype(int)
 
-    # ===================== 儲存 =====================
-    # 儲存 best model + tokenizer
-    trainer.save_model(str(OUTPUT_DIR))
-    tokenizer.save_pretrained(str(OUTPUT_DIR))
-    joblib.dump(le, LABEL_ENCODER_PATH)
+    rep = classification_report(y_test_bin, y_pred, digits=4, zero_division=0)
+    print(f"[{target_label}] threshold(from val) = {best_t}")
+    print(rep)
 
-    print(f"\nSaved model/tokenizer => {OUTPUT_DIR.resolve()}")
-    print(f"Saved label encoder => {LABEL_ENCODER_PATH.resolve()}")
+    trainer.save_model(str(model_out_dir))
+    tokenizer.save_pretrained(str(model_out_dir))
+
+    return best_t, rep
+
+
+def main():
+    set_seed(SEED)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Data not found: {DATA_PATH.resolve()}")
+
+    df = pd.read_csv(DATA_PATH).dropna(subset=["text", "label"]).copy()
+    df["text"] = df["text"].astype(str).str.strip()
+    df["label"] = df["label"].astype(str).str.strip()
+    df = df[(df["text"] != "") & (df["label"].isin(LABELS))].reset_index(drop=True)
+
+    print(f"Loaded rows(raw cleaned): {len(df)}")
+    print(df["label"].value_counts())
+
+    # 先切分（防止全資料先去重造成洩漏偏樂觀）
+    X = df["text"].astype(str).to_numpy(dtype=object)
+    y = df["label"].astype(str).to_numpy(dtype=object)
+
+
+    X_train_full, X_test, y_train_full, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=SEED, stratify=y
+    )
+
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full, test_size=0.1, random_state=SEED, stratify=y_train_full
+    )
+
+    # 只在 train 內去重（同 text+label）
+    train_df = pd.DataFrame({"text": X_train, "label": y_train}).drop_duplicates(["text", "label"])
+    X_train = train_df["text"].values
+    y_train = train_df["label"].values
+
+    # 洩漏檢查（文字完全重複）
+    train_text_set = set(map(str, X_train))
+    test_text_set = set(map(str, X_test))
+    overlap = len(train_text_set & test_text_set)
+    print(f"Train/Test exact text overlap: {overlap} / {len(test_text_set)}")
+
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+    threshold_map: Dict[str, float] = {}
+    reports: Dict[str, str] = {}
+
+    for target_label in LABELS:
+        y_train_bin = (y_train == target_label).astype(int)
+        y_val_bin = (y_val == target_label).astype(int)
+        y_test_bin = (y_test == target_label).astype(int)
+
+        best_t, rep = train_one_binary(
+            target_label=target_label,
+            tokenizer=tokenizer,
+            X_train=X_train, y_train_bin=y_train_bin,
+            X_val=X_val, y_val_bin=y_val_bin,
+            X_test=X_test, y_test_bin=y_test_bin
+        )
+        threshold_map[target_label] = best_t
+        reports[target_label] = rep
+
+    config = {
+        "labels": LABELS,
+        "thresholds": threshold_map,
+        "model_name": MODEL_NAME,
+        "max_len": MAX_LEN,
+        "model_dir": str(OUT_DIR.as_posix()),
+        "note": "Threshold selected on VAL only; TEST used once for final report."
+    }
+    with open(OUT_DIR / "ovr_config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+    with open(OUT_DIR / "reports.json", "w", encoding="utf-8") as f:
+        json.dump(reports, f, ensure_ascii=False, indent=2)
+
+    print("\nSaved =>", (OUT_DIR / "ovr_config.json").resolve())
+    print("Thresholds:", threshold_map)
 
 
 if __name__ == "__main__":

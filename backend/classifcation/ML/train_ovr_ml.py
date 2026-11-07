@@ -1,109 +1,131 @@
-# 匯入必要的套件
-from pathlib import Path  # 用來處理檔案路徑
-import pandas as pd       # 用於資料讀取和處理
-import joblib             # 用於模型的存取（儲存與讀取）
-from sklearn.model_selection import train_test_split  # 用於將資料分割成訓練集與測試集
-from sklearn.pipeline import Pipeline                 # 用於建立 ML 流水線
-from sklearn.feature_extraction.text import TfidfVectorizer  # 將文字轉換成 TF-IDF 特徵向量
-from sklearn.linear_model import LogisticRegression  # 邏輯迴歸分類器
-from sklearn.metrics import classification_report    # 用於評估模型表現
+from __future__ import annotations
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, List
+import json
+
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.pipeline import Pipeline
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, precision_recall_fscore_support
+from sklearn.model_selection import train_test_split
 
 
-# 指定資料與模型儲存的路徑
 DATA_PATH = Path("./data_set/train_full_dataset.csv")
-MODEL_PATH = Path("backend_ml_guardrail_model.joblib")           # 模型儲存路徑
+OUT_DIR = Path("./backend_ml_ovr_models")
+LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
 
-# 主程式函數
+@dataclass
+class BinModelResult:
+    label: str
+    threshold: float
+    report: str
+
+
+def build_binary_pipeline() -> Pipeline:
+    return Pipeline([
+        ("tfidf", TfidfVectorizer(
+            analyzer="char",
+            ngram_range=(1, 5),
+            min_df=1,
+            sublinear_tf=True
+        )),
+        ("lr", LogisticRegression(
+            max_iter=4000,
+            class_weight="balanced",
+            C=2.0,
+            solver="lbfgs"
+        ))
+    ])
+
+
+def find_best_threshold(y_true_bin: np.ndarray, y_prob: np.ndarray) -> float:
+    # 用 F1 掃 threshold（可改成偏 recall 或 precision）
+    best_t, best_f1 = 0.5, -1.0
+    for t in np.arange(0.30, 0.91, 0.02):
+        y_pred = (y_prob >= t).astype(int)
+        p, r, f1, _ = precision_recall_fscore_support(
+            y_true_bin, y_pred, average="binary", zero_division=0
+        )
+        if f1 > best_f1:
+            best_f1 = f1
+            best_t = float(round(t, 2))
+    return best_t
+
+
 def main():
-    """
-    訓練 Guardrail 分類器（TF-IDF + LogisticRegression）的完整流程：
-    - 讀取 CSV、欄位檢查、資料清理
-    - 切分訓練/測試集
-    - 建立並訓練 Pipeline
-    - 輸出分類報告與模型檔案
-    """
-    # 檢查資料檔案是否存在，若不存在就丟出錯誤
     if not DATA_PATH.exists():
-        raise FileNotFoundError(f"DATA_PATH not found: {DATA_PATH.resolve()}")
+        raise FileNotFoundError(f"Data not found: {DATA_PATH.resolve()}")
 
-    # 使用 pandas 讀取 CSV 資料
-    df = pd.read_csv(DATA_PATH)
-
-    # 確認 CSV 是否包含必要的欄位 "text" 與 "label"
-    required_cols = {"text", "label"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"CSV must contain columns: {required_cols}, got: {list(df.columns)}")
-
-    # ===================== 資料清理 =====================
-    # 1. 移除 text 或 label 欄位有缺失值的列
-    df = df.dropna(subset=["text", "label"]).copy()
-
-    # 2. 將 text 與 label 轉成字串並去除首尾空白
+    df = pd.read_csv(DATA_PATH).dropna(subset=["text", "label"]).copy()
     df["text"] = df["text"].astype(str).str.strip()
     df["label"] = df["label"].astype(str).str.strip()
-
-    # 3. 移除空字串的列
     df = df[df["text"] != ""]
-
-    # 4. 移除重複的 text-label 組合
+    df = df[df["label"].isin(LABELS)]
     df = df.drop_duplicates(subset=["text", "label"]).reset_index(drop=True)
 
-    # 顯示清理後資料的數量與標籤分佈
     print(f"Loaded rows: {len(df)}")
     print("Label distribution:")
     print(df["label"].value_counts())
 
-    # ===================== 建立特徵與標籤 =====================
     X = df["text"].astype(str).to_numpy(dtype=object)
     y = df["label"].astype(str).to_numpy(dtype=object)
 
 
-    # 將資料拆分成訓練集與測試集
-    # test_size=0.2 -> 20% 作為測試集
-    # stratify=y -> 保持標籤分佈一致
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # ===================== 建立模型流水線 =====================
-    clf = Pipeline([
-        # 文字向量化
-        ("tfidf", TfidfVectorizer(
-            analyzer="char",       # 以字元為單位（而不是單詞）
-            ngram_range=(1, 5),    # 取 1~5 個字元組成的 n-gram
-            min_df=1,              # 出現次數至少 1 次
-            sublinear_tf=True      # TF 權重使用 sublinear scaling (1 + log(tf))
-        )),
-        # 邏輯迴歸分類器
-        ("lr", LogisticRegression(
-            max_iter=4000,         # 最大迭代次數，確保收斂
-            class_weight="balanced", # 自動平衡不同類別的權重
-            C=2.0,                 # 正則化強度，越大越弱正則化
-            solver="lbfgs"         # 最適合小/中型資料的求解器
-        ))
-    ])
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 訓練模型
-    clf.fit(X_train, y_train)
+    threshold_map: Dict[str, float] = {}
+    reports: Dict[str, str] = {}
 
-    # 對測試集做預測
-    pred = clf.predict(X_test)
+    # 訓練四個二元模型
+    for target_label in LABELS:
+        print("\n" + "=" * 72)
+        print(f"Training binary model: {target_label} vs NOT_{target_label}")
 
-    # ===================== 評估模型 =====================
-    print("\n=== Classification Report ===")
-    # 顯示 Precision、Recall、F1-score、Support
-    # digits=4 -> 顯示四位小數
-    # zero_division=0 -> 避免除以 0 報錯
-    print(classification_report(y_test, pred, digits=4, zero_division=0))
+        y_train_bin = (y_train == target_label).astype(int)
+        y_test_bin = (y_test == target_label).astype(int)
 
-    # ===================== 儲存模型 =====================
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # 儲存模型
-    joblib.dump(clf, MODEL_PATH)
-    print(f"\nSaved model => {MODEL_PATH.resolve()}")
+        clf = build_binary_pipeline()
+        clf.fit(X_train, y_train_bin)
+
+        # 機率（正類 = 1）
+        y_prob = clf.predict_proba(X_test)[:, 1]
+        best_t = find_best_threshold(y_test_bin, y_prob)
+        threshold_map[target_label] = best_t
+
+        y_pred = (y_prob >= best_t).astype(int)
+        rep = classification_report(y_test_bin, y_pred, digits=4, zero_division=0)
+        reports[target_label] = rep
+
+        print(f"[{target_label}] best threshold = {best_t}")
+        print(rep)
+
+        model_path = OUT_DIR / f"{target_label.lower()}_bin.joblib"
+        joblib.dump(clf, model_path)
+        print(f"saved => {model_path.resolve()}")
+
+    # threshold 設定
+    config = {
+        "labels": LABELS,
+        "thresholds": threshold_map,
+        "model_dir": str(OUT_DIR.as_posix()),
+        "note": "OvR binary models: label vs not_label"
+    }
+    with open(OUT_DIR / "ovr_config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+    print("\n" + "=" * 72)
+    print("Saved config =>", (OUT_DIR / "ovr_config.json").resolve())
+    print("Thresholds:", threshold_map)
 
 
-# 如果這個檔案被執行，而不是被匯入，就執行 main()
 if __name__ == "__main__":
     main()
