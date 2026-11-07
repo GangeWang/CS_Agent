@@ -7,12 +7,12 @@ $log = "all_output.txt"
 "" | Out-File $log
 
 $scripts = @(
-    "ML\train_binary_ml.py",
+    "ML\train_multiclass_ml.py",
     "ML\train_ovr_ml.py",
-    "BILSTM\train_binary_bilstm.py",
+    "BILSTM\train_multiclass_bilstm.py",
     "BILSTM\train_ovr_bilstm.py",
-    "transformer\train_ovr_transformer.py",
-    "transformer\train_binary_transformer_legacy.py"
+    "transformer\train_multiclass_transformer_legacy.py",
+    "transformer\train_ovr_transformer.py"
 )
 
 foreach ($s in $scripts) {
