@@ -369,7 +369,17 @@ async def health():
         except Exception:
             return False
 
-    ok = await loop.run_in_executor(executor, do_test)
+    # llama_cpp 的 Llama instance 非執行緒安全：健康檢查也必須過 semaphore，
+    # 避免與串流/generate 並發使用同一模型（先前只靠單 worker executor 僥倖序列化）。
+    # 忙碌時快速失敗，避免 health check 排在長生成後面造成誤報。
+    try:
+        await asyncio.wait_for(inference_semaphore.acquire(), timeout=15)
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=503, content={"status": "error", "detail": "inference busy"})
+    try:
+        ok = await loop.run_in_executor(executor, do_test)
+    finally:
+        inference_semaphore.release()
     return {"status": "ok" if ok else "error"}
 
 @app.post("/api/generate")
@@ -405,7 +415,12 @@ async def generate(request: Request, auth=Depends(verify_api_key)):
             logger.exception("generate failed: %s", e)
             raise
 
-    text = await loop.run_in_executor(executor, blocking)
+    # 非串流端點同樣必須過 semaphore（先前完全沒有並發保護）
+    await inference_semaphore.acquire()
+    try:
+        text = await loop.run_in_executor(executor, blocking)
+    finally:
+        inference_semaphore.release()
     return {"text": text}
 
 @app.post("/api/stream")
@@ -470,8 +485,16 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
         try:
             loop.run_in_executor(executor, blocking_stream)
             while True:
-                chunk = await queue.get()
-                yield f"data: {chunk}\n\n"
+                raw = await queue.get()
+                yield f"data: {raw}\n\n"
+                # done/error 後必須結束 generator 釋放 semaphore；
+                # 此前無限等待下一筆，靠 client 斷線才收尾，client 不斷線會堵死後續所有串流
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(payload, dict) and (payload.get("done") or payload.get("error")):
+                    break
         finally:
             inference_semaphore.release()
 
