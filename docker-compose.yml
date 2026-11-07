@@ -23,8 +23,10 @@ services:
     environment:
       LLAMA_MODEL_PATH: /models/CS_AgentV12.gguf
       LLAMA_N_GPU_LAYERS: "-1"        # 全部層進 GPU
-      LLAMA_N_CTX: "131072"           # 128K；KV cache 走系統 RAM（offload_kqv=false）才裝得下
-      LLAMA_OFFLOAD_KV: "false"       # KV cache 留 RAM：128K KV ≈ 3GB，16GB VRAM 卡放不下
+      LLAMA_N_CTX: "32768"            # 32K：q8_0 KV + flash_attn 全塞 VRAM，實測 VRAM ~14.9GB（16GB 卡）
+      LLAMA_FLASH_ATTN: "true"        # q8_0 KV 的必要條件
+      LLAMA_KV_Q8: "true"             # KV q8_0：VRAM 減半，實測生成速度損失 ~20%
+      # LLAMA_OFFLOAD_KV 預設 true（KV 在 VRAM）；設 false 可開 128K，但生成掉到 ~2 tok/s
       # LLAMA_API_KEY: ""             # 有需要再開
       # LLAMA_MAX_CONCURRENT: "1"
     volumes:
@@ -45,6 +47,8 @@ services:
     restart: unless-stopped
     environment:
       LLAMA_API_URL: http://inference:10000
+      # 對齊 inference 實際 context（BaseSettings 以環境變數覆蓋 llama_context_max_tokens）
+      LLAMA_CONTEXT_MAX_TOKENS: "32768"
       GUARDRAIL_DEVICE: cpu            # 容器內 guardrail 用 CPU；改 cuda 需換 backend image（見 backend/Dockerfile 註解）
       GUARDRAIL_CPU_THREADS: "4"
     volumes:
