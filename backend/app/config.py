@@ -34,8 +34,20 @@ class Settings(BaseSettings):
     llama_debug: bool = False
 
     # WebSocket Configuration
-    max_message_size: int = 10 * 1024  # 10KB
+    max_message_size: int = 10 * 1024  # 10KB（bytes，以 UTF-8 計）
     history_max_length: int = 20  # Maximum number of messages to keep in history
+    # 每個連線的訊息速率限制：window 秒內最多 messages 則（防一次性灌爆 guardrail/LLM 資源）
+    ws_rate_limit_messages: int = 30
+    ws_rate_limit_window_seconds: float = 60.0
+    # WS handshake Origin 白名單（瀏覽器 CSWSH 防護；CORS middleware 不涵蓋 WebSocket）
+    # 需要完全關閉檢查時設為 ["*"]。非瀏覽器客戶端（無 Origin header）一律允許。
+    ws_allowed_origins: list[str] = [
+        "http://localhost:5173", "http://localhost:3000", "http://localhost:8080",
+        "http://127.0.0.1:5173", "http://127.0.0.1:3000", "http://127.0.0.1:8080",
+    ]
+
+    # 串流時兩個 chunk 之間的最大等待秒數（逾時則回「模型回應逾時」）
+    stream_chunk_timeout: float = 120.0
 
     # Timeout Configuration (for other HTTP calls)
     request_timeout: float = 30.0

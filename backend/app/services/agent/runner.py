@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Callable
 
 from .executor import execute_plan
 from .memory import append_short_term, get_short_term
-from ..context_manager import manage_context
 from .planner import plan_steps
 from ..streamer import request_stream_sync
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_latest_user_message(messages: object) -> str | None:
@@ -102,13 +104,11 @@ def run_agent(
         history = _extract_history_messages(messages)
 
     system_messages = [{"role": "system", "content": merged_system}]
-    history, context_meta = manage_context(history, system_messages, user_msg, model)
-    if context_meta.get("applied"):
-        # Agent traces are intentionally returned only in the API result/logs, not
-        # streamed to the browser UI.
-        pass
 
-    # 注意：guardrail system 會在 ws.py 注入
+    # 注意：
+    # 1) context 管理（manage_context）由呼叫端（ws.py）統一執行並持久化到 session，
+    #    這裡不再重做，否則同一輪會對 LLM 做兩次壓縮摘要。
+    # 2) guardrail system 會在 ws.py 注入（存在傳入 messages 的 system role 中）。
     augmented_history = system_messages + history
 
     final_chunks: List[str] = []
@@ -134,10 +134,10 @@ def run_agent(
 
     final = "".join(final_chunks).strip()
     if not final:
+        # 錯誤細節只進 log，不當成助手回覆送給使用者
         if error_text:
-            final = f"LLM 生成失敗：{error_text[-1]}"
-        else:
-            final = "LLM 生成失敗，請稍後再試。"
+            logger.warning("Agent LLM generation failed: %s", error_text[-1])
+        final = "LLM 生成失敗，請稍後再試。"
 
     if session_id is not None:
         append_short_term(session_id, "user", user_msg)

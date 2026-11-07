@@ -12,7 +12,7 @@
 #
 # 埠對外：
 #   front      8080  （SPA + /ws/chat 反代 + /health 便利用）
-#   backend    8000  （直連除錯用；正式環境可移除，瀏覽器流量走 front）
+#   backend    8000  （直連除錯用，僅綁 127.0.0.1；正式環境建議整段移除，瀏覽器流量走 front）
 #   inference  10000 （僅綁 127.0.0.1，容器間走內部網路）
 
 services:
@@ -61,7 +61,7 @@ services:
       # HuggingFace 模型快取（SentenceTransformer），避免每次重抓
       - hf-cache:/app/hf-cache
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"         # 僅綁本機供除錯；瀏覽器流量一律走 front 反代
     depends_on:
       - inference
 

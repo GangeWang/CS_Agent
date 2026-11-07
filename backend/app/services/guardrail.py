@@ -142,6 +142,22 @@ SPAM_INTENT_PATTERNS = [
 
 URL_REGEX = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 
+# =============================
+# Runtime state (for /health visibility)
+# =============================
+# 模型資源載入狀態：載入失敗時 /health 需能顯示 degraded，而非 silent fail-open。
+_GUARDRAIL_STATE = {"loaded": False, "error": None}
+
+
+def guardrail_status() -> dict:
+    """回報 guardrail 資源載入狀態（供 /health 使用，不觸發載入）。"""
+    return {"loaded": bool(_GUARDRAIL_STATE["loaded"]), "error": _GUARDRAIL_STATE["error"]}
+
+
+def _fail_closed_enabled() -> bool:
+    # GUARDRAIL_FAIL_CLOSED=true 時，模型不可用且規則未命中 → 以 PROMPT_ATTACK 拒答（fail-closed）
+    return os.environ.get("GUARDRAIL_FAIL_CLOSED", "").strip().lower() in ("1", "true", "yes", "on")
+
 
 # =============================
 # Utility
@@ -386,6 +402,9 @@ def _load_guardrail_resources():
 
     whitelist = set(map(str.lower, cfg.get("whitelist_domains", sorted(WHITELIST_DOMAINS))))
 
+    _GUARDRAIL_STATE["loaded"] = True
+    _GUARDRAIL_STATE["error"] = None
+
     return {
         "models": models,
         "tokenizers": tokenizers,
@@ -529,9 +548,40 @@ def classify_text(text: str) -> dict:
 
     except Exception as e:
         logger.warning(f"Guardrail classification unavailable: {e}")
+        _GUARDRAIL_STATE["loaded"] = False
+        _GUARDRAIL_STATE["error"] = str(e)
+
+        # Fail-safe：不再默認放行（fail-open）。降級為「純規則」篩查（規則不依賴模型）；
+        # 仍未命中時，依 GUARDRAIL_FAIL_CLOSED 決定拒答（PROMPT_ATTACK）或標記 UNCERTAIN。
+        try:
+            rr = rule_first(text, set(WHITELIST_DOMAINS))
+        except Exception as rule_err:
+            logger.warning(f"Guardrail rule-only stage also failed: {rule_err}")
+            rr = None
+
+        if rr:
+            lb, cf, reason = rr
+            logger.warning(f"Guardrail DEGRADED to rule-only; rule hit: label={lb} reason={reason}")
+            probs = {x: (1.0 if x == lb else 0.0) for x in LABELS}
+            return {
+                "stage": "RULE_DEGRADED",
+                "label": lb,
+                "confidence": cf,
+                "reason": f"degraded rule-only hit: {reason}",
+                "probs": probs,
+                "flags": {},
+                "topk": [],
+                "available": False,
+            }
+
+        degraded_label = "PROMPT_ATTACK" if _fail_closed_enabled() else "UNCERTAIN"
+        logger.warning(
+            "Guardrail DEGRADED, no rule hit; label=%s (GUARDRAIL_FAIL_CLOSED=%s)",
+            degraded_label, _fail_closed_enabled(),
+        )
         return {
-            "stage": "FALLBACK",
-            "label": "NORMAL",
+            "stage": "DEGRADED",
+            "label": degraded_label,
             "confidence": 0.0,
             "reason": f"service unavailable: {e}",
             "probs": {},

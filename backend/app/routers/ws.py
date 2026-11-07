@@ -13,7 +13,9 @@ import functools
 import json
 import logging
 import math
+from collections import deque
 from typing import Dict, List
+from urllib.parse import urlparse
 
 from cachetools import TTLCache
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -38,6 +40,41 @@ ABUSIVE_COOLDOWN_NOTICE = ""
 
 # Only these chunk types are allowed to reach the browser UI.
 ALLOWED_STREAM_TYPES = {"delta", "done", "error"}
+
+
+def _origin_allowed(websocket: WebSocket) -> bool:
+    """
+    WebSocket handshake Origin 檢查（CSWSH 防護）。
+
+    CORS middleware 不涵蓋 WebSocket，需在 accept 前自行驗證：
+    1) 無 Origin header（非瀏覽器客戶端：curl / 測試 / 伺服器間呼叫）→ 允許
+       （CSWSH 攻擊只能來自瀏覽器，瀏覽器一定帶 Origin）
+    2) 白名單含 "*" → 允許（明確關閉檢查）
+    3) Origin 的 host:port 與 Host header 相同（同源反代：nginx / vite proxy）→ 允許
+    4) Origin 在 settings.ws_allowed_origins 白名單 → 允許
+    其餘拒絕。
+    """
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+
+    allowed = [o for o in (settings.ws_allowed_origins or []) if o]
+    if "*" in allowed:
+        return True
+
+    host_header = (websocket.headers.get("host") or "").lower()
+    try:
+        origin_netloc = urlparse(origin).netloc.lower()
+    except Exception:
+        origin_netloc = ""
+
+    if host_header and origin_netloc and origin_netloc == host_header:
+        return True
+
+    if origin in allowed or origin_netloc in {a.lower() for a in allowed}:
+        return True
+
+    return False
 
 
 def _append_and_trim_history(session_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -160,6 +197,16 @@ def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | Non
 
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
+    # Origin 檢查需在 accept 之前：close() 會以 HTTP 403 拒絕 handshake
+    if not _origin_allowed(websocket):
+        logger.warning(
+            "WebSocket rejected (origin not allowed): origin=%s host=%s",
+            websocket.headers.get("origin"),
+            websocket.headers.get("host"),
+        )
+        await websocket.close(code=1008, reason="origin not allowed")
+        return
+
     await websocket.accept()
     loop = asyncio.get_event_loop()
 
@@ -169,6 +216,7 @@ async def ws_chat(websocket: WebSocket) -> None:
     last_dialogue_at = loop.time()
     idle_warning_sent = False
     last_model: str | None = None
+    msg_times: deque = deque()  # 每連線速率限制：window 內的使用者訊息時間戳
 
     logger.info("WebSocket connection established: session_id=%s", session_id)
 
@@ -177,7 +225,12 @@ async def ws_chat(websocket: WebSocket) -> None:
         summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
         logger.info("Conversation summary session_id=%s reason=%s summary=%s", session_id, reason, summary)
 
-        await websocket.send_text(json_dumps({"type": "conversation_summary", "reason": reason, "summary": "對話已關閉"}))
+        # 回傳真實摘要內容（前端會渲染此訊息）；摘要失敗時給 fallback 文案
+        await websocket.send_text(json_dumps({
+            "type": "conversation_summary",
+            "reason": reason,
+            "summary": summary or "摘要產生失敗，請稍後再試。",
+        }))
         await websocket.send_text(json_dumps({"type": "conversation_ended", "reason": reason}))
         await websocket.close(code=1000, reason="conversation ended")
 
@@ -185,7 +238,8 @@ async def ws_chat(websocket: WebSocket) -> None:
         while True:
             raw = await websocket.receive_text()
 
-            if len(raw) > settings.max_message_size:
+            # max_message_size 以 bytes 計（UTF-8）；中文字元 3 bytes，用字元數會低估 3 倍
+            if len(raw.encode("utf-8")) > settings.max_message_size:
                 await websocket.send_text(json_dumps({"type": "error", "error": f"訊息過大 (最大 {settings.max_message_size} bytes)"}))
                 continue
 
@@ -236,16 +290,39 @@ async def ws_chat(websocket: WebSocket) -> None:
             last_dialogue_at = loop.time()
             idle_warning_sent = False
 
+            # ---- rate limit ----
+            # 每則使用者訊息都會觸發 4 個 transformer 推論 + RAG + LLM 生成，需限制頻率
+            now = loop.time()
+            while msg_times and now - msg_times[0] > settings.ws_rate_limit_window_seconds:
+                msg_times.popleft()
+            if len(msg_times) >= settings.ws_rate_limit_messages:
+                logger.warning("Rate limit exceeded for session %s", session_id)
+                await websocket.send_text(json_dumps({"type": "error", "error": "傳送過於頻繁，請稍候再試。"}))
+                continue
+            msg_times.append(now)
+
             # ---- guardrail ----
             # classify_text 內含 transformer 推論（同步），放到執行緒池避免阻塞 event loop
-            guardrail_label = (await asyncio.to_thread(classify_text, user_msg)).get("label", "NORMAL")
+            guardrail_result = await asyncio.to_thread(classify_text, user_msg)
+            guardrail_label = guardrail_result.get("label", "NORMAL")
+            guardrail_degraded = not guardrail_result.get("available", True)
+            if guardrail_degraded:
+                logger.warning(
+                    "Guardrail DEGRADED for session %s: stage=%s reason=%s",
+                    session_id, guardrail_result.get("stage"), guardrail_result.get("reason"),
+                )
             guardrail_instruction = _build_guardrail_instruction(guardrail_label)
 
             # Keep your existing "guardrail" event (front-end should NOT render it as bubble)
-            await websocket.send_text(json_dumps({"type": "guardrail", "label": guardrail_label}))
+            await websocket.send_text(json_dumps({
+                "type": "guardrail",
+                "label": guardrail_label,
+                "degraded": guardrail_degraded,
+            }))
 
             # ---- RAG ----
-            rag_hit = retrieve_rag_hit(user_msg, min_score=3)
+            # 同步檔案 I/O + 分詞計分，包 to_thread 避免阻塞 event loop
+            rag_hit = await asyncio.to_thread(retrieve_rag_hit, user_msg, min_score=3)
 
             # Debug only on backend (NOT sent to WS)
             if rag_hit:
@@ -284,7 +361,10 @@ async def ws_chat(websocket: WebSocket) -> None:
             if not isinstance(context_strategy, str):
                 context_strategy = None
 
-            history, context_meta = manage_context(
+            # manage_context 在 compress 策略下會「同步呼叫 LLM 做摘要」（可達數十秒），
+            # 必須放到執行緒池，否則會阻塞整個 event loop（所有連線的 ping/delta 全部停擺）
+            history, context_meta = await asyncio.to_thread(
+                manage_context,
                 history,
                 [{"role": "system", "content": effective_system_instruction}],
                 user_msg,
@@ -338,7 +418,7 @@ async def ws_chat(websocket: WebSocket) -> None:
 
                 try:
                     while True:
-                        chunk = await asyncio.wait_for(q.get(), timeout=120)
+                        chunk = await asyncio.wait_for(q.get(), timeout=settings.stream_chunk_timeout)
 
                         t = chunk.get("type")
                         if t not in ALLOWED_STREAM_TYPES:
@@ -402,7 +482,7 @@ async def ws_chat(websocket: WebSocket) -> None:
 
             try:
                 while True:
-                    chunk = await asyncio.wait_for(q.get(), timeout=120)
+                    chunk = await asyncio.wait_for(q.get(), timeout=settings.stream_chunk_timeout)
 
                     t = chunk.get("type")
                     if t not in ALLOWED_STREAM_TYPES:
