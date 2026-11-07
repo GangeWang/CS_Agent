@@ -1,0 +1,6 @@
+# 白名單模式：只把 server_llama.py 送進 build context
+# （排除所有模型/資料/checkpoint，避免 context 爆量）
+*
+!server_llama.py
+!Dockerfile
+!.dockerignore

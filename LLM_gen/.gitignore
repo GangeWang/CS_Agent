@@ -2,6 +2,7 @@
 *.gguf
 *.bin
 *.safetensors
+*.whl
 
 # python
 __pycache__/
@@ -13,3 +14,7 @@ env/
 
 # logs
 *.log
+
+# 訓練中間產物（checkpoint / optimizer state / unsloth 自動快取）
+outputs/
+unsloth_compiled_cache/

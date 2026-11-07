@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>客服聊天機器人</title>
-    <script type="module" src="/@vite/client"></script>
+    <!-- 注意：不要硬編碼 /@vite/client；dev 由 vite 自動注入，build 時會破壞 env defines 注入（__DEFINES__ is not defined） -->
 </head>
 <body>
 <!-- 集中放置所有重用的 SVG defs（放在 body 開頭、#root 之前） -->

@@ -48,7 +48,8 @@ else:
     MODEL_DIR = Path(__file__).resolve().parents[2] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
 
 MODEL_DIR = _ensure_path(MODEL_DIR)
-semantic_path = Path("semantic_models")
+# 相對於本檔案定位，避免受工作目錄（CWD）影響——不同目錄啟動會 silently 跳過語意階段
+semantic_path = Path(__file__).resolve().parents[2] / "semantic_models"
 
 # CONFIG_PATH should point to the ovr_config.json file inside MODEL_DIR.
 _config_env = os.environ.get("GUARDRAIL_CONFIG_PATH", None)

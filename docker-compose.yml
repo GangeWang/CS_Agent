@@ -1,0 +1,78 @@
+# CS_Agent 全棧編排：前端（nginx）+ 後端（FastAPI + guardrail）+ 推理服務（GPU）
+#
+# 使用前：
+#   1) 把 GGUF 模型放到 ./models/CS_AgentV12.gguf，或以環境變數覆蓋：
+#        LLAMA_MODEL_FILE=E:/path/to/model.gguf docker compose up -d
+#   2) docker compose up -d --build
+#
+# 驗證：
+#   docker compose ps
+#   curl http://localhost:8000/health          # 期待 llama: connected
+#   瀏覽器開 http://localhost:8080             # 前端；WS 走同源由 nginx 反代
+#
+# 埠對外：
+#   front      8080  （SPA + /ws/chat 反代 + /health 便利用）
+#   backend    8000  （直連除錯用；正式環境可移除，瀏覽器流量走 front）
+#   inference  10000 （僅綁 127.0.0.1，容器間走內部網路）
+
+services:
+  inference:
+    build: ./LLM_gen
+    image: cs-agent/inference:latest
+    restart: unless-stopped
+    environment:
+      LLAMA_MODEL_PATH: /models/CS_AgentV12.gguf
+      LLAMA_N_GPU_LAYERS: "-1"        # 全部層進 GPU
+      LLAMA_N_CTX: "32768"            # 32K：q8_0 KV + flash_attn 全塞 VRAM，實測 VRAM ~14.9GB（16GB 卡）
+      LLAMA_FLASH_ATTN: "true"        # q8_0 KV 的必要條件
+      LLAMA_KV_Q8: "true"             # KV q8_0：VRAM 減半，實測生成速度損失 ~20%
+      # LLAMA_OFFLOAD_KV 預設 true（KV 在 VRAM）；設 false 可開 128K，但生成掉到 ~2 tok/s
+      # LLAMA_API_KEY: ""             # 有需要再開
+      # LLAMA_MAX_CONCURRENT: "1"
+    volumes:
+      - ${LLAMA_MODEL_FILE:-./models/CS_AgentV12.gguf}:/models/CS_AgentV12.gguf:ro
+    ports:
+      - "127.0.0.1:10000:10000"       # 僅綁本機；容器間走內部網路
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  backend:
+    build: ./backend
+    image: cs-agent/backend:latest
+    restart: unless-stopped
+    environment:
+      LLAMA_API_URL: http://inference:10000
+      # 對齊 inference 實際 context（BaseSettings 以環境變數覆蓋 llama_context_max_tokens）
+      LLAMA_CONTEXT_MAX_TOKENS: "32768"
+      GUARDRAIL_DEVICE: cpu            # 容器內 guardrail 用 CPU；改 cuda 需換 backend image（見 backend/Dockerfile 註解）
+      GUARDRAIL_CPU_THREADS: "4"
+    volumes:
+      # guardrail OvR 模型（重訓後不用重建 image）
+      - ./backend/classifcation:/app/backend/classifcation:ro
+      # 語意庫（semantic_texts/labels/embeddings）
+      - ./backend/semantic_models:/app/backend/semantic_models:ro
+      # RAG 知識庫
+      - ./backend/app/data:/app/backend/app/data:ro
+      # HuggingFace 模型快取（SentenceTransformer），避免每次重抓
+      - hf-cache:/app/hf-cache
+    ports:
+      - "8000:8000"
+    depends_on:
+      - inference
+
+  front:
+    build: ./Front
+    image: cs-agent/front:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  hf-cache:

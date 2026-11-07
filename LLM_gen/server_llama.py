@@ -31,11 +31,34 @@ N_CTX = int(os.environ.get("LLAMA_N_CTX", "2048"))
 N_GPU_LAYERS = int(os.environ.get("LLAMA_N_GPU_LAYERS", "32"))
 N_THREADS = int(os.environ.get("LLAMA_N_THREADS", "4"))
 API_KEY = os.environ.get("LLAMA_API_KEY", None)
+# KV cache 位置：true（預設）= 進 VRAM（快）；false = 留系統 RAM（可開超大 n_ctx，速度較慢）
+OFFLOAD_KV = os.environ.get("LLAMA_OFFLOAD_KV", "true").strip().lower() in ("1", "true", "yes", "on")
+# flash_attn：q8_0 KV 的必要條件；實測對速度幾乎無影響
+FLASH_ATTN = os.environ.get("LLAMA_FLASH_ATTN", "false").strip().lower() in ("1", "true", "yes", "on")
+# KV cache 量化 q8_0：VRAM 佔用減半，實測生成速度損失 ~20%（需 FLASH_ATTN=true）
+KV_Q8 = os.environ.get("LLAMA_KV_Q8", "false").strip().lower() in ("1", "true", "yes", "on")
+
+try:
+    from llama_cpp import GGML_TYPE_Q8_0
+except ImportError:
+    from llama_cpp.llama_cpp import GGML_TYPE_Q8_0
 
 # instantiate Llama client
 try:
-    llm = Llama(model_path=MODEL_PATH, n_ctx=N_CTX, n_gpu_layers=N_GPU_LAYERS, n_threads=N_THREADS)
-    logger.info("Llama client created (model_path=%s, n_gpu_layers=%s)", MODEL_PATH, N_GPU_LAYERS)
+    llm = Llama(
+        model_path=MODEL_PATH,
+        n_ctx=N_CTX,
+        n_gpu_layers=N_GPU_LAYERS,
+        n_threads=N_THREADS,
+        offload_kqv=OFFLOAD_KV,
+        flash_attn=FLASH_ATTN,
+        type_k=GGML_TYPE_Q8_0 if KV_Q8 else None,
+        type_v=GGML_TYPE_Q8_0 if KV_Q8 else None,
+    )
+    logger.info(
+        "Llama client created (model_path=%s, n_gpu_layers=%s, n_ctx=%d, offload_kqv=%s, flash_attn=%s, kv_q8=%s)",
+        MODEL_PATH, N_GPU_LAYERS, N_CTX, OFFLOAD_KV, FLASH_ATTN, KV_Q8,
+    )
 except Exception as e:
     logger.exception("Failed to create Llama client: %s", e)
     llm = None
