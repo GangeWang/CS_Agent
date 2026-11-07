@@ -6,8 +6,8 @@ from tqdm import tqdm
 # ======================
 # 參數設定
 # ======================
-INPUT_FILE = "ML_data.csv"
-OUTPUT_FILE = "data_set/clean.csv"
+INPUT_FILE = "merged_full_dataset.csv"
+OUTPUT_FILE = "deduped_full_dataset.csv"
 SIMILARITY_THRESHOLD = 0.95
 
 # ======================
