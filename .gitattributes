@@ -1,0 +1,4 @@
+# 大型模型檔走 Git LFS；-text 防止換行正規化破壞二進位與 LFS pointer
+*.safetensors filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text
