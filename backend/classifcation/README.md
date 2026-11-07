@@ -204,3 +204,31 @@ Training binary model: SPAM vs NOT_SPAM
    macro avg     1.0000    1.0000    1.0000      1138
 weighted avg     1.0000    1.0000    1.0000      1138
 ```
+
+---
+
+## 資料集溯源與管線
+
+最終訓練集 `data_set/train_full_dataset.csv`（21,567 筆）由下列管線產生（腳本於 `data_pipeline/`，依步驟編號）：
+
+```
+【外部原始】                        【抽取 step01-03】            【翻譯 step06 (ollama)】
+HF parquet (32.4MB) ──→ extracted_abusive.csv ──→ abusive_translated_zh.csv (9,433)
+sms-spam-collection.csv ──→ extracted_spam.csv ──→ spam_translated_zh.csv (747)
+JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ deduped_prompt_attack.csv (4,172) ──→ prompt_attack_translated_zh.csv (4,172)
+
+【合併 step07】08-21
+    三個翻譯檔 + data_set/ML_data.csv（7 月舊世代 18,689 筆）
+  = merged_full_dataset.csv（33,041 筆）
+
+【去重 step08】08-21
+    merged_full_dataset.csv → deduped_full_dataset.csv（21,567 筆）
+  = data_set/train_full_dataset.csv（md5 與去重產物一致）
+
+【消費】run_all_training.ps1 → 六種分類方式訓練腳本
+```
+
+- 歷史檔名對照：`full_data_set_fillted.csv`（filtered 錯字）= 現 `train_full_dataset.csv`；`FILLTTER/` = 現 `data_pipeline/`
+- 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
+- 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
+- 完整實驗結果與選型理由見本檔上方各方法 Classification Report

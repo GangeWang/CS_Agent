@@ -50,3 +50,19 @@ htmlcov/
 
 # Node modules (for frontend)
 node_modules/
+
+# Docker：host 端模型放置目錄（GGUF 等，volume 掛載用）
+/models/
+
+# --- 分類模型：腳本/資料集/最終模型/README 入庫；中間產物不入庫 ---
+backend/classifcation/BILSTM/backend_ml_guardrail_bilstm_pytorch.pt
+backend/classifcation/BILSTM/backend_ml_guardrail_label_encoder.joblib
+backend/classifcation/BILSTM/backend_ml_guardrail_vocab.joblib
+backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/**/*.pt
+backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/vocab.joblib
+backend/classifcation/ML/backend_ml_guardrail_model.joblib
+backend/classifcation/ML/backend_ml_ovr_models/*.joblib
+backend/classifcation/transformer/backend_ml_guardrail_transformer/
+backend/classifcation/transformer/backend_ml_ovr_transformer_models_clean/**/training_args.bin
+LLM_gen/model_train/outputs/
+LLM_gen/*.whl
