@@ -9,7 +9,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from app.routers.ws import router as ws_router
-from app.services.guardrail import classify_text
+from app.services.guardrail import classify_text, guardrail_status
 
 from app.config import settings
 
@@ -107,21 +107,29 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     """
-    Health check endpoint that verifies both the API and connected LLAMA (WSL) service.
+    Health check endpoint：確認 API 本體、LLAMA 推理服務與 guardrail 模型狀態。
+
+    錯誤細節只進 log，回應不攜帶 exception 字串（避免內部資訊外洩）。
     Returns:
-        dict: Status information including LLAMA connectivity
+        dict: status / llama / guardrail
     """
+    gr = guardrail_status()
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            # 確認 WSL LLAMA server 的 /health
+            # 確認推理服務的 /health
             response = await client.get(f"{settings.llama_api_url.rstrip('/')}/health")
-            if response.status_code == 200:
-                return {"status": "ok", "llama": "connected"}
-            else:
-                return {"status": "degraded", "llama": "error", "details": f"HTTP {response.status_code}"}
+        llama = "connected" if response.status_code == 200 else f"HTTP {response.status_code}"
     except Exception as e:
         logger.warning(f"Health check - LLAMA connection failed: {e}")
-        return {"status": "degraded", "llama": "disconnected", "error": str(e)}
+        llama = "disconnected"
+
+    llama_ok = llama == "connected"
+    return {
+        "status": "ok" if (llama_ok and gr["loaded"]) else "degraded",
+        "llama": llama,
+        "guardrail": "ok" if gr["loaded"] else "degraded",
+    }
 
 # WebSocket 路由
 app.include_router(ws_router)

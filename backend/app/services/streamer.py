@@ -45,10 +45,15 @@ class _ChannelFilter:
         ctype = chunk.get("type")
         if ctype == "done":
             if not self._found_final and self._buf:
-                clean = _SPECIAL_TOKEN_RE.sub("", self._buf).strip()
-                clean = _sanitize_visible_text(clean)
-                if clean:
-                    self._on_chunk({"type": "delta", "text": clean})
+                # 從未出現 final marker：buffer 可能是 analysis/CoT 內容（marker 被 chunk 邊界切斷）。
+                # 只要 buffer 內含任何特殊標記語法就整段丟棄，絕不 flush 給使用者；
+                # 純文字（無標記語法，如非 chat-template 模型輸出）才允許 flush。
+                if _SPECIAL_TOKEN_RE.search(self._buf):
+                    logger.warning("Dropped %d chars of buffered text containing special tokens (no final marker)", len(self._buf))
+                else:
+                    clean = _sanitize_visible_text(self._buf.strip())
+                    if clean:
+                        self._on_chunk({"type": "delta", "text": clean})
             self._buf = ""
             self._on_chunk(chunk)
             return
@@ -164,7 +169,8 @@ def request_stream_sync(
     messages.append({"role": "user", "content": user_msg})
 
     max_tokens = getattr(settings, "llama_max_tokens", 512)
-    effective_max_tokens = max(max_tokens, 1024)
+    # 保留一個小下限避免 0/負值，但尊重設定值（先前硬性 max(…, 1024) 讓 LLAMA_MAX_TOKENS=512 永遠無效）
+    effective_max_tokens = max(256, int(max_tokens))
 
     payload = {
         "prompt": user_msg,
@@ -184,7 +190,9 @@ def request_stream_sync(
     try:
         with client.stream("POST", stream_url, json=payload, headers=headers) as resp:
             if resp.status_code != 200:
-                filtered_on_chunk({"type": "error", "error": f"HTTP {resp.status_code}: {resp.text}"})
+                # 細節（含上游 response body）只進 log；對外僅回通用訊息，避免洩漏內部拓撲
+                logger.warning("LLM stream endpoint HTTP %s: %s", resp.status_code, resp.text[:500])
+                filtered_on_chunk({"type": "error", "error": f"LLM 服務暫時無法回應（HTTP {resp.status_code}）"})
                 return
 
             for raw in resp.iter_lines():
@@ -210,6 +218,12 @@ def request_stream_sync(
                 except Exception:
                     _debug("Dropped non-JSON SSE line:", data[:200])
                     continue
+
+                # 上游回傳 {"error": …} 時要明確終止並回通用錯誤（此前被靜默丟棄，只能等 120s timeout）
+                if isinstance(part, dict) and part.get("error"):
+                    logger.warning("LLM stream error payload: %s", json.dumps(part, ensure_ascii=False)[:500])
+                    filtered_on_chunk({"type": "error", "error": "LLM 服務發生錯誤，請稍後再試。"})
+                    return
 
                 if isinstance(part, dict) and part.get("done") is True:
                     text_chunk = _extract_text_from_part(part) or ""
@@ -237,14 +251,17 @@ def request_stream_sync(
     except Exception as e:
         logger.warning("Stream exception, fallback to non-streaming: %s", e)
 
+        # 非串流 fallback 是完整生成（可遠超 llama_request_timeout），使用 llama_stream_timeout
         try:
-            resp2 = client.post(once_url, json=payload, headers=headers, timeout=settings.llama_request_timeout)
+            resp2 = client.post(once_url, json=payload, headers=headers, timeout=settings.llama_stream_timeout)
         except Exception as e2:
-            filtered_on_chunk({"type": "error", "error": f"LLAMA 連線失敗：{e2}"})
+            logger.warning("LLAMA non-streaming fallback failed: %s", e2)
+            filtered_on_chunk({"type": "error", "error": "LLM 連線失敗，請稍後再試。"})
             return
 
         if resp2.status_code != 200:
-            filtered_on_chunk({"type": "error", "error": f"HTTP {resp2.status_code}: {resp2.text}"})
+            logger.warning("LLM generate endpoint HTTP %s: %s", resp2.status_code, resp2.text[:500])
+            filtered_on_chunk({"type": "error", "error": f"LLM 服務暫時無法回應（HTTP {resp2.status_code}）"})
             return
 
         try:
