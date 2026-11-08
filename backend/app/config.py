@@ -2,14 +2,19 @@
 Configuration management for CS_Agent backend.
 Uses Pydantic Settings for environment-based configuration.
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
-    
-    # LLAMA (WSL) Configuration
-    # 請設定為 WSL 上啟動的推理服務位址 (例如 http://127.0.0.1:11434)
+
+    model_config = SettingsConfigDict(
+        # 自動從 backend/.env 載入設定，未提供時使用上方預設值
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+    # LLM 推理服務（llama.cpp server）位址
     llama_api_url: str = "http://127.0.0.1:10000"
     # 可選的簡單授權 token（若你在 WSL server 實作 API key 驗證）
     llama_api_key: str | None = None
@@ -55,11 +60,6 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
-
-    class Config:
-        # 自動從 backend/.env 載入設定，未提供時使用上方預設值
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 # Global settings instance

@@ -19,8 +19,8 @@ CS_Agent 是一個**即時客服對話系統**，採用 **FastAPI（後端）+ R
 - **Vite（rolldown-vite）**：快速開發與建置，支援現代化打包流程。
 - **Markdown 渲染**：`react-markdown` 搭配 `remark-gfm/remark-math`。
 - **KaTeX**：數學公式排版（`rehype-katex`）。
-- **語法高亮**：`rehype-highlight` + `highlight.js`。
-- **內容清理**：`DOMPurify` + `rehype-sanitize` 雙層防護。
+- **數學式渲染**：KaTeX（inline style 經 rehype-sanitize 白名單放行）。
+- **內容清理**：`rehype-sanitize` 白名單式清理（KaTeX 之後執行，唯一 HTML 防線）。
 
 ### LLM 服務（可選）
 - 支援本地 `llama.cpp` 或外部推理服務。

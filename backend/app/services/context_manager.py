@@ -8,7 +8,8 @@ from .streamer import request_stream_sync
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_GPT_OSS_20B_CONTEXT_TOKENS = 128 * 1024
+# 預設上下文上限（tokens）；部署可透過 LLAMA_CONTEXT_MAX_TOKENS 覆蓋
+DEFAULT_CONTEXT_MAX_TOKENS = 128 * 1024
 
 SUMMARY_ROLE = "system"
 SUMMARY_PREFIX = "[CONVERSATION_SUMMARY]"
@@ -34,10 +35,8 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
 
 
 def _configured_context_max_tokens() -> int:
-    # Ollama lists gpt-oss:20b with a 128K context window. Use 128 * 1024
-    # tokens as the project default while still allowing deployments to lower it
-    # through LLAMA_CONTEXT_MAX_TOKENS when VRAM/RAM is constrained.
-    return max(256, int(getattr(settings, "llama_context_max_tokens", OLLAMA_GPT_OSS_20B_CONTEXT_TOKENS)))
+    # 預設 128K tokens；VRAM/RAM 受限時可透過 LLAMA_CONTEXT_MAX_TOKENS 調低
+    return max(256, int(getattr(settings, "llama_context_max_tokens", DEFAULT_CONTEXT_MAX_TOKENS)))
 
 
 def _context_budget_tokens() -> int:
@@ -111,8 +110,8 @@ def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -
     request_stream_sync(prompt, model, on_chunk, None)
     summary = "".join(chunks).strip()
     if summary:
-        logger.info("Context compression summary generated:\n%s", summary)
-        print(f"[context_summary]\n{summary}", flush=True)
+        # 摘要含對話內容：log 只留前 300 字供排查，完整內容不進日誌
+        logger.debug("Context compression summary generated (first 300 chars):\n%s", summary[:300])
         return f"{SUMMARY_PREFIX}\n以下是較早對話的壓縮摘要，請視為歷史上下文依據：\n{summary}\n{SUMMARY_SUFFIX}"
 
     if errors:
