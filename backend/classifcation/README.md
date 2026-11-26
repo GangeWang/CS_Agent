@@ -228,6 +228,12 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 【消費】run_all_training.ps1 → 六種分類方式訓練腳本
 ```
 
+- **入庫的只有原始來源與翻譯結果**（2026-11-26 清理）：外部原始資料（HF parquet、`JailBreakV_28K.csv`、`sms-spam-collection.csv`）、
+  翻譯產物（`*_translated_zh.csv`，ollama 翻譯無法便宜重現）、`data_set/` 底下的檔案。
+  抽取與合併的中間檔（`extracted_*.csv`、`deduped_prompt_attack.csv`、`merged_full_dataset.csv`）可以依上面的步驟重跑；
+  `deduped_full_dataset.csv` 與 `data_set/train_full_dataset.csv` 內容完全相同（md5 一致）。這些檔案和從沒被任何腳本用到的
+  `spml_prompt_injection.csv` 都已從目前版本移除，需要時可從 git 歷史取回：
+  `git checkout ba4c63a -- backend/classifcation/<檔名>`（取回後再依新目錄名搬移）
 - 歷史檔名對照：`full_data_set_fillted.csv`（filtered 錯字）= 現 `train_full_dataset.csv`；`FILLTTER/` = 現 `data_pipeline/`
 - 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
 - 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
