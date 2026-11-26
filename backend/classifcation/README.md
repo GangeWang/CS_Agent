@@ -268,12 +268,12 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 | SPAM 模板誤組出 31 筆合法通知（「若非本人請忽略」、「請備份資料」） | 標籤錯誤 |
 | 完全缺少「困難負樣本」：含立即/投資/加入/垃圾/禮品卡/網址、轉貼可疑簡訊詢問真偽等正常提問 | 與 guardrail 規則誤判同一類問題 |
 
-處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（10,138 筆：NORMAL 4,471 / ABUSIVE 3,560 / SPAM 1,420 / PROMPT_ATTACK 687）。
-每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` 的 140 筆人工撰寫樣本（以困難負樣本為主）。
+處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（10,153 筆：NORMAL 4,467 / ABUSIVE 3,579 / SPAM 1,420 / PROMPT_ATTACK 687）。
+每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` 的 157 筆人工撰寫樣本（以困難負樣本與「有情緒但無髒話」樣本為主）。
 `data_set/hard_eval.csv` 為困難評估集（不進訓練），重訓後請以它驗證誤判。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
 
 已知限制 / 後續：
 - NORMAL 長句仍偏少（長度捷徑未完全消除）→ 以 `step10_augment_normal_ollama.py` 擴增，人工抽查後併入
 - PROMPT_ATTACK 只剩 687 筆，且翻譯來源有同一越獄模板的多個翻譯變體 → 建議再補中文客服情境的注入樣本
-- 「激動抱怨但無辱罵」在 ML_data 中被標 ABUSIVE（如「客服裝死不理人！準備接客訴」），此標籤定義需確認
+- 標籤定義（2026-11-26 確認）：ABUSIVE = 使用者「有情緒」（不滿、焦急、失望、憤怒，有無髒話皆算），策略是先安撫再回答；ML_data 中「客服裝死不理人！準備接客訴」這類激動抱怨標 ABUSIVE 是正確的。人工種子已依此定義標註
 - v2 尚未重新訓練；上線模型仍是舊資料訓練的版本
