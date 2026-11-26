@@ -23,9 +23,17 @@ SYSTEM_PROMPT = (
 )
 
 # ── Channel filter 常數 ───────────────────────────────────────────────
+# gpt-oss（harmony 格式）的輸出：先 analysis channel（思考），再 final channel（給使用者看的回覆）。
+# llama-cpp-python 轉文字時預設**不印特殊標記**（detokenize(special=False)），所以同一段輸出可能是：
+#   有標記：<|channel|>analysis<|message|>思考…<|end|><|start|>assistant<|channel|>final<|message|>回覆
+#   無標記：analysis思考…assistantfinal回覆
+# 推理服務會先拿掉 <|start|>/<|end|>/<|return|>。兩種寫法都要能切出 final 之後的內容。
 _CHANNEL_FINAL_MARKER = "<|channel|>final<|message|>"
+_FINAL_MARKERS = (_CHANNEL_FINAL_MARKER, "assistantfinal")
 _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|>]*\|>")
-_ANALYSIS_PREFIX_RE = re.compile(r"^\s*(analysis|assistantcommentary)\b", re.IGNORECASE)
+# 輸出開頭是這些字 → harmony 格式（先緩衝，等 final 才送出）；其他開頭 → 一般純文字，直接串流
+_HARMONY_STARTS = ("<|", "analysis", "commentary", "assistant", "final")
+NO_FINAL_ERROR = "模型這次沒有產生回覆，請再試一次。"
 
 
 # ── 動態 endpoint ────────────────────────────────────────────────────
@@ -36,26 +44,48 @@ def _get_endpoints():
 
 # ── Channel 過濾器 ──────────────────────────────────────────────────
 class _ChannelFilter:
+    """
+    把推理服務的串流切成「給使用者看的部分」。
+
+    mode：
+    - None：還在看開頭，判斷不出格式（例如只收到 "ana"）
+    - "plain"：開頭不是 harmony 的字樣 → 一般模型輸出，收到就送
+    - "harmony"：還在 analysis/commentary channel → 只緩衝，不送
+    - "final"：已經看到 final 標記 → 之後的內容逐段送出
+
+    harmony 格式到結束都沒看到 final（例如思考把 max_tokens 用完），緩衝內容一律丟掉、改回錯誤，
+    絕不把思考內容送給使用者。
+    """
+
     def __init__(self, on_chunk: Callable[[dict], None]) -> None:
         self._on_chunk = on_chunk
-        self._found_final = False
+        self._mode: Optional[str] = None
         self._buf = ""
+
+    def _emit_text(self, text: str) -> None:
+        clean = _SPECIAL_TOKEN_RE.sub("", text)
+        if clean:
+            self._on_chunk({"type": "delta", "text": clean})
+
+    def _try_enter_final(self) -> bool:
+        hits = [(self._buf.find(m), m) for m in _FINAL_MARKERS if m in self._buf]
+        head = self._buf.lstrip()
+        if not hits and head.startswith("final") and not head.startswith("finally"):
+            # 無標記且沒有 analysis，直接以 final channel 開頭："final您好…"
+            hits = [(len(self._buf) - len(head), "final")]
+        if not hits:
+            return False
+        pos, marker = min(hits)
+        after = self._buf[pos + len(marker):]
+        self._mode = "final"
+        self._buf = ""
+        self._emit_text(after.lstrip() if marker != _CHANNEL_FINAL_MARKER else after)
+        return True
 
     def feed(self, chunk: dict) -> None:
         ctype = chunk.get("type")
         if ctype == "done":
-            if not self._found_final and self._buf:
-                # 從未出現 final marker：buffer 可能是 analysis/CoT 內容（marker 被 chunk 邊界切斷）。
-                # 只要 buffer 內含任何特殊標記語法就整段丟棄，絕不 flush 給使用者；
-                # 純文字（無標記語法，如非 chat-template 模型輸出）才允許 flush。
-                if _SPECIAL_TOKEN_RE.search(self._buf):
-                    logger.warning("Dropped %d chars of buffered text containing special tokens (no final marker)", len(self._buf))
-                else:
-                    clean = _sanitize_visible_text(self._buf.strip())
-                    if clean:
-                        self._on_chunk({"type": "delta", "text": clean})
-            self._buf = ""
-            self._on_chunk(chunk)
+            self._finish(chunk)
             return
         if ctype != "delta":
             self._on_chunk(chunk)
@@ -64,39 +94,51 @@ class _ChannelFilter:
         text = chunk.get("text", "")
         if not text:
             return
-
-        if self._found_final:
-            clean = _SPECIAL_TOKEN_RE.sub("", text)
-            clean = _sanitize_visible_text(clean)
-            if clean:
-                self._on_chunk({"type": "delta", "text": clean})
+        if self._mode in ("final", "plain"):
+            self._emit_text(text)
             return
 
         self._buf += text
-        if _CHANNEL_FINAL_MARKER in self._buf:
-            _, after = self._buf.split(_CHANNEL_FINAL_MARKER, 1)
-            self._found_final = True
+        if self._mode is None:
+            head = self._buf.lstrip()
+            if not head:
+                return
+            if head.startswith(_HARMONY_STARTS):
+                self._mode = "harmony"
+            elif any(s.startswith(head) for s in _HARMONY_STARTS):
+                return  # 只收到 "ana" 這種前綴，等下一段再判斷
+            else:
+                self._mode = "plain"
+                buf, self._buf = self._buf, ""
+                self._emit_text(buf)
+                return
+        self._try_enter_final()
+
+    def _finish(self, done_chunk: dict) -> None:
+        if self._buf and self._mode is None:
+            # 整段只有一個很短的前綴（例如回覆就是 "fin"）：當純文字送出
+            self._emit_text(self._buf)
+        elif self._mode == "harmony":
+            if self._buf:
+                logger.warning(
+                    "Dropped %d chars of model output without a final channel (reasoning only?)", len(self._buf)
+                )
             self._buf = ""
-            clean = _SPECIAL_TOKEN_RE.sub("", after)
-            clean = _sanitize_visible_text(clean)
-            if clean:
-                self._on_chunk({"type": "delta", "text": clean})
-
-
-def _sanitize_visible_text(text: str) -> str:
-    if not text:
-        return ""
-    if _ANALYSIS_PREFIX_RE.match(text):
-        return ""
-    return text
+            self._on_chunk({"type": "error", "error": NO_FINAL_ERROR})
+            return
+        self._buf = ""
+        self._on_chunk(done_chunk)
 
 
 def _strip_channel_tokens(text: str) -> str:
-    if _CHANNEL_FINAL_MARKER in text:
-        _, after = text.split(_CHANNEL_FINAL_MARKER, 1)
-        text = after
-    text = _SPECIAL_TOKEN_RE.sub("", text).strip()
-    return _sanitize_visible_text(text).strip()
+    """非串流的完整輸出：用同一個過濾器切出 final 內容；切不出來（只有思考）回空字串。"""
+    out: list[dict] = []
+    f = _ChannelFilter(out.append)
+    f.feed({"type": "delta", "text": text})
+    f.feed({"type": "done"})
+    if any(c.get("type") == "error" for c in out):
+        return ""
+    return "".join(c.get("text", "") for c in out if c.get("type") == "delta").strip()
 
 
 def _build_effective_system_prompt(conversation_history: Optional[list[dict]]) -> str:
@@ -204,8 +246,8 @@ def _parse_stream_line(raw: str) -> list[dict]:
         logger.warning("LLM stream error payload: %s", json.dumps(part, ensure_ascii=False)[:500])
         return [{"type": "error", "error": "LLM 服務發生錯誤，請稍後再試。"}]
 
+    # 不在這裡逐段丟掉 "analysis" 開頭的片段：_ChannelFilter 要靠它判斷是不是 harmony 格式
     text_chunk = _extract_text_from_part(part) if isinstance(part, dict) else None
-    text_chunk = _sanitize_visible_text(text_chunk or "")
     out = [{"type": "delta", "text": text_chunk}] if text_chunk else []
     if isinstance(part, dict) and part.get("done") is True:
         out.append({"type": "done"})

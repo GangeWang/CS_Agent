@@ -212,10 +212,9 @@ export default function App() {
             ws.onmessage = (evt) => {
                 try {
                     const payload = JSON.parse(evt.data)
-                    if (payload?.type === 'pong') {
-                        heartbeatRef.current.missed = 0
-                        return
-                    }
+                    // 收到任何訊息都代表連線還活著（串流中的 delta 也算），不只 pong
+                    heartbeatRef.current.missed = 0
+                    if (payload?.type === 'pong') return
                     handleWsPayload(payload)
                 } catch (err) {
                     console.error('[ws] parse error', err)

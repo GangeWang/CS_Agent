@@ -32,25 +32,14 @@ def get_time() -> str:
     return f"現在時間為\n{now.strftime('%Y.%m.%d %H:%M:%S')}"
 
 
-def summarize(text: str) -> str:
-    return text[:200] + ("..." if len(text) > 200 else "")
-
-
 def lookup_doc(query: str) -> str:
-    # MVP stub，之後改成文件檢索
-    return f"[doc] matched for query: {query}"
+    # MVP stub，之後改成文件檢索。不可把 query（使用者原文）放進回傳值：工具結果會進 system 指令
+    return "（文件檢索尚未接上，沒有找到相關文件）"
 
 
 GET_TIME_SCHEMA = {
     "type": "object",
     "properties": {},
-    "additionalProperties": False,
-}
-
-SUMMARIZE_SCHEMA = {
-    "type": "object",
-    "properties": {"text": {"type": "string"}},
-    "required": ["text"],
     "additionalProperties": False,
 }
 
@@ -63,5 +52,4 @@ LOOKUP_DOC_SCHEMA = {
 
 
 register_tool("get_time", "取得目前 UTC 時間", GET_TIME_SCHEMA, get_time)
-register_tool("summarize", "摘要文本內容（截斷前 200 字）", SUMMARIZE_SCHEMA, summarize)
 register_tool("lookup_doc", "查詢文件（MVP stub）", LOOKUP_DOC_SCHEMA, lookup_doc)
