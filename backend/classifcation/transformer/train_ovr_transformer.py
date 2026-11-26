@@ -22,7 +22,7 @@ from transformers import (
 )
 
 # ===================== 路徑與常數 =====================
-DATA_PATH = Path("./data_set/train_full_dataset.csv")
+DATA_PATH = Path("./data_set/train_full_dataset_v2.csv")  # step09 清理版；舊版保留供對照
 OUT_DIR = Path("./backend_ml_ovr_transformer_models_clean")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 MODEL_NAME = "hfl/chinese-roberta-wwm-ext"

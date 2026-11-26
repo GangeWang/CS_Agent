@@ -1,4 +1,4 @@
-# 依序訓練六種分類方式（資料集：data_set/train_full_dataset.csv）
+# 依序訓練六種分類方式（資料集：data_set/train_full_dataset_v2.csv（step09 清理版））
 # 原名 batch_run.ps1，改名以符合用途；腳本清單同步新版命名
 Set-Location "E:\CS_Agent\backend\classifcation"
 $py = "..\.venv\Scripts\python.exe"

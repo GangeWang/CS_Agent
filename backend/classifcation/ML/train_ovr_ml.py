@@ -14,7 +14,7 @@ from sklearn.metrics import classification_report, precision_recall_fscore_suppo
 from sklearn.model_selection import train_test_split
 
 
-DATA_PATH = Path("./data_set/train_full_dataset.csv")
+DATA_PATH = Path("./data_set/train_full_dataset_v2.csv")  # step09 清理版；舊版保留供對照
 OUT_DIR = Path("./backend_ml_ovr_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 

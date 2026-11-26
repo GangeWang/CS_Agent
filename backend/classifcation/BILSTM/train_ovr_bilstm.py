@@ -16,7 +16,7 @@ from torch.utils.data import Dataset, DataLoader
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("./data_set/train_full_dataset.csv")
+DATA_PATH = Path("./data_set/train_full_dataset_v2.csv")  # step09 清理版；舊版保留供對照
 OUT_DIR = Path("./backend_ml_ovr_bilstm_models")
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 

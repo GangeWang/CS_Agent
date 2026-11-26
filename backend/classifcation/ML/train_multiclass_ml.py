@@ -10,7 +10,7 @@ from sklearn.metrics import classification_report    # 用於評估模型表現
 
 
 # 指定資料與模型儲存的路徑
-DATA_PATH = Path("./data_set/train_full_dataset.csv")
+DATA_PATH = Path("./data_set/train_full_dataset_v2.csv")  # step09 清理版；舊版保留供對照
 MODEL_PATH = Path("backend_ml_guardrail_model.joblib")           # 模型儲存路徑
 
 

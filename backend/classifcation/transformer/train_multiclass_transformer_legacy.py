@@ -22,7 +22,7 @@ from transformers import (
 
 
 # ===================== 路徑設定 =====================
-DATA_PATH = Path("./data_set/train_full_dataset.csv")
+DATA_PATH = Path("./data_set/train_full_dataset_v2.csv")  # step09 清理版；舊版保留供對照
 OUTPUT_DIR = Path("backend_ml_guardrail_transformer")  # 存模型與tokenizer
 LABEL_ENCODER_PATH = OUTPUT_DIR / "label_encoder.joblib"
 
