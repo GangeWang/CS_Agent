@@ -9,7 +9,7 @@
 
 後端的高優先 bug 已修好；guardrail 訓練資料已清理並補上人工樣本；六支訓練腳本已改為共用切分與評估。
 2026-11-26 負責人已在自己的 GPU 機器上用 v2 重訓六種方法。上線流程在 hard_eval 答對 46/47 句，macro-F1 0.974（見第 6 節）。
-**新模型目前只在負責人的機器上，還沒 commit 進倉庫**；語意庫也還沒用 v2 重建。
+之後又補了第三批人工樣本（NORMAL 長句與英文樣本，見 3.2），**v2 已更新，需要再重訓一次**；新模型重訓後再 commit 進倉庫。
 
 ---
 
@@ -21,6 +21,7 @@
 | `ABUSIVE` 標籤定義 | ＝「有情緒」：不滿、焦急、失望、憤怒都算，**有沒有髒話都算**。例：「客服裝死不理人！準備接客訴」是 ABUSIVE |
 | `NORMAL` 標籤定義 | 語氣平穩的一般詢問，即使內容有「立即、投資、垃圾、加入」等字眼 |
 | `PROMPT_ATTACK` / `SPAM` | 拒答 |
+| 離題閒聊、笑話 | 維持 **SPAM**（拒答），不改標 NORMAL（2026-11-26 決定）。SPAM 裡來自 SMS Spam 資料集的笑話保留原標籤 |
 | 架構選擇 | 負責人的實測結果是 **OvR 比 4選1 好**，上線維持 OvR。新的統一評估可用來再確認（見第 6 節） |
 | 補充樣本的方式 | **人工撰寫**，不要用本機 ollama 擴增（品質不可靠）；ollama 擴增腳本已移除 |
 | 資料庫 | **還沒搭建**。對話狀態存在記憶體、agent 長期記憶是 stub，都是刻意的，等 DB 建好再處理 |
@@ -53,9 +54,10 @@
   - 翻譯失敗殘留英文 1,282 筆。
   - NORMAL 全是 26 字以內的模板句，模型會學到長度捷徑。
   - 大量近重複資料。
-- `data_set/train_full_dataset_v2.csv`：10,533 筆（NORMAL 4,691 / ABUSIVE 3,639 / SPAM 1,458 / PROMPT_ATTACK 745）。
+- `data_set/train_full_dataset_v2.csv`：10,755 筆（NORMAL 4,887 / ABUSIVE 3,649 / SPAM 1,464 / PROMPT_ATTACK 755）。
 - `data_set/removed_rows_v2.csv`：每一筆被移除的資料和原因。
 - `data_pipeline/curated_seed_data.py`、`curated_seed_extra.py`：537 筆人工樣本。
+- `data_pipeline/curated_seed_long.py`（第三批，GPU 重訓之後加入）：185 句 30 字以上的 NORMAL（其中 48 句 73～89 字），加上 37 句英文樣本（NORMAL 11 / ABUSIVE 10 / PROMPT_ATTACK 10 / SPAM 6）。NORMAL 30 字以上從 116 筆增加到 312 筆，英文為主的樣本從 38 筆增加到 75 筆。
 - `data_set/hard_eval.csv`：47 筆困難評估集，**不進訓練**。重訓後最重要的就是看這份的成績。
 
 ### 3.3 訓練腳本（`backend/classifcation/`）
@@ -73,13 +75,12 @@
 
 1. ~~Review 並 merge PR #35~~（已完成）。
 2. ~~在有 GPU 的機器上用 v2 重訓六種方法~~（2026-11-26 已完成，結果見第 6 節）。
-3. **重建語意庫並重跑端到端評估**：`build_semantic_models.py` → `evaluate_guardrail_pipeline.py`。第 6 節的上線流程數字用的還是舊語意庫。
-4. **把新模型 commit 進倉庫**（Git LFS），上線環境才會拿到新模型。
+3. **用更新後的 v2 再重訓一次**：v2 在 GPU 重訓之後補了第三批樣本。直接跑 `run_all_training.ps1`（PR #36 的修正版），它會一併重建語意庫並做端到端評估。請和第 6 節的數字比較，特別是 hard_eval。
+4. **把新模型和語意庫 commit 進倉庫**（Git LFS），上線環境才會拿到新模型：`transformer/backend_ml_ovr_transformer_models_clean/`、`backend/semantic_models/`，以及 `reports/`。
 5. **（可選）OvR 改 4選1**：準確度打平（見第 6 節），只有在需要加快推論時才值得換。4選1 只要 1 次 forward，OvR 要 4 次；上線程式目前只支援 OvR，換的話要改 `guardrail.py`。
-6. **再清一次 SPAM 標籤**：transformer 在 test 上的錯誤，有不少是笑話和閒聊被標成 SPAM（例：「一個害怕黑暗的小孩怎麼變成整夜想在外面的青少年」、「離婚芭比」、「哈哈哈…」）。這類句子算 SPAM 還是 NORMAL 要先和負責人定義，再統一標註。
-7. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`（以簡體語料為主）。現有模型在 hard_eval 已經 0.97，優先度降低。
-8. 視評估結果決定是否**再補 NORMAL 長句和英文樣本**（目前 30 字以上的 NORMAL 只有 116 筆、英文為主的樣本只有 38 筆），由人工撰寫。
-9. 處理第 8 節剩下的技術債。
+6. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`（以簡體語料為主）。現有模型在 hard_eval 已經 0.97，優先度降低。
+7. **長度捷徑還沒完全消除**：30 字以上的訊息裡，NORMAL 只佔 13%（312 / 2,392）；NORMAL 有約 4,200 筆是 15 字以內的 ML_data 模板句，很多語意不通（例：「請問註冊地址要預約？」）。可以考慮把這些短模板句下採樣到 2,000～2,500 筆，但這會改變類別比例，要用 GPU 重訓確認 hard_eval 沒有退步再採用。
+8. 處理第 8 節剩下的技術債。
 
 ---
 
@@ -131,6 +132,8 @@ pytest tests/          # 目前 51 個，全部通過
 
 > 上線流程這一列，用的還是 v2 之前的舊語意庫（當時 `run_all_training.ps1` 還沒有重建語意庫這一步）。只有 0.2% 的句子會走到語意比對，重建後的影響應該很小，但仍建議重跑一次。
 
+> 上表是第三批樣本加入**之前**的 v2。加入之後（v2 = 10,755 筆），sandbox 重訓 TF-IDF 的 hard_eval：4選1 從 0.809 升到 0.837；OvR 從 0.735 升到 0.810，UNCERTAIN 從 21.3% 降到 4.3%。Transformer 要等 GPU 重訓。
+
 觀察：
 - **Transformer 遠勝其他方法**：hard_eval 0.97，TF-IDF 和 BiLSTM 只有 0.73～0.80。
   - 4選1 錯的 1 句是英文的 prompt attack（Ignore the above...）被判成 ABUSIVE。
@@ -151,8 +154,8 @@ pytest tests/          # 目前 51 個，全部通過
 - **v2 重訓的新模型還沒 commit 進倉庫**，倉庫和 docker 映像檔裡仍是舊模型。
 - `server_llama.py` 的改動只做過語法檢查，沒有在 GPU 環境實際跑過。
 - 後端測試在 sandbox 是用 stub 取代 torch/transformers 跑的，這些測試本身不載入模型。
-- NORMAL 長句仍然偏少，長度捷徑只是減輕，還沒有完全消除。
-- 英文樣本很少（以英文為主的只有 38 筆），英文訊息容易誤判。如果客群會用英文，需要補英文樣本。
+- NORMAL 長句仍然偏少（30 字以上 312 筆），長度捷徑只是減輕，還沒有完全消除（見第 4 節第 7 點）。
+- 英文樣本仍少（以英文為主的 75 筆），TF-IDF 和 BiLSTM 對英文仍容易誤判。如果客群常用英文，需要再補。
 - `GUARDRAIL_FAIL_CLOSED` 預設仍是關閉，模型缺檔時會用保守指令回覆，而不是拒答。
 
 ---
