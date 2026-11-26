@@ -198,10 +198,10 @@ def test_rag_exact_and_ngram(tmp_path, monkeypatch):
     monkeypatch.setattr(rag, "_cached_mtime", None)
 
     hit = rag.retrieve_rag_hit("退貨流程是什麼")
-    assert hit is not None and hit.score == 9999 and "7 天" in hit.answer
+    assert hit is not None and hit.score == 1.0 and "7 天" in hit.answer
 
     hit2 = rag.retrieve_rag_hit("我想問退貨流程")
-    assert hit2 is not None and hit2.score >= 3
+    assert hit2 is not None and 0.4 <= hit2.score < 1.0
 
 
 # ---------- agent ----------

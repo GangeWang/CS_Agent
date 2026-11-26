@@ -111,11 +111,28 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 
 ---
 
+## FAQ 檢索（RAG）
+
+知識庫是 `app/data/rag_db.json`（`[{"question", "aliases", "answer"}]`），檔案改了會自動重新載入。
+
+- 比對：完全相同直接命中；否則把「請問、怎麼、可以」這類贅詞去掉，中文取雙字詞、英數取單字，
+  用 IDF 加權算相似度（0～1），達到 `RAG_MIN_SCORE`（預設 0.4）才附給模型。
+- 命中時，提示會請模型先判斷這筆 FAQ 是否真的回答了問題，不相關就不要硬套。
+- guardrail 判成 `PROMPT_ATTACK` / `SPAM` 的訊息一律拒答，不查 RAG。
+- 換 FAQ 或調門檻後跑 `python tools/eval_rag.py`（可加 `--min-score 0.5`）：
+  會列出換句話問法的命中率（`tools/rag_eval_queries.csv`，換 FAQ 時要一起換）與 hard_eval 199 句的誤命中。
+
+目前數字（舊做法「雙字詞重疊數 ≥ 3」→ 新做法）：換句話問法 31/37 → 37/37 命中正確；
+hard_eval 誤命中 52/199（含 13 句提示詞攻擊）→ 3/199（其中 2 句是同主題不同題目）。
+
+---
+
 ## API 與事件
 
 ### `GET /health`
 
-檢查 API 本身與 LLM 服務連線狀態。
+回 `status`（`ok` / `degraded`）、`llama`（推理服務：`connected` / `HTTP <code>` / `disconnected`）、
+`guardrail`（模型是否已載入）、`context_max_tokens`（目前實際使用的上下文上限）。
 
 ### `WS /ws/chat`
 
@@ -144,8 +161,9 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 - `{"type":"clear_history"}`
 - `{"type":"end_conversation"}`
 
-後端事件（客服模式）：
+後端事件（客服模式與 Agent 模式相同）：
 
+- `guardrail`（`label`、`degraded`；前端只用來更新狀態列）
 - `delta`
 - `done`
 - `error`
@@ -155,15 +173,12 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 - `conversation_summary`
 - `conversation_ended`
 
-Agent 模式新增事件：
-
-- `agent_trace`（plan + tool_results）
-- `agent_final`
+Agent 模式的 plan 與工具結果只寫進後端 log，不送到前端。
 
 ---
 
 ## 開發提醒
 
-- 請先閱讀 `CODE_REVIEW_2026-04-28.md` 再進行重構。
+- 交接與目前狀態見倉庫根目錄 `HANDOFF.md`；舊的審查文件在 `docs/archive/`。
 - 若要延伸訊息協定，請同步更新前端 `Front/src/App.jsx` 的 payload handler。
-- 若要上線，建議加入：結構化 logging、速率限制、整合測試。
+- 測試：`pip install -r requirements.txt -r requirements-dev.txt && pytest -q tests/`（不需要真的模型或推理服務）。

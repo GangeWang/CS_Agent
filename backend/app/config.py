@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     context_window_keep_recent_messages: int = 8
     context_summary_target_chars: int = 1200
 
+    # RAG：FAQ 相似度門檻（0～1，見 services/rag.py）。調低會多命中但也多誤命中
+    rag_min_score: float = 0.4
+
     # 推理服務 debug 訊號（streamer 的 _debug 會讀取）
     llama_debug: bool = False
 

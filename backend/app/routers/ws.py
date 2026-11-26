@@ -27,7 +27,7 @@ from ..services import inference_info, session_store
 from ..services.agent.runner import run_agent_stream
 from ..services.context_manager import manage_context, summarize_conversation
 from ..services.guardrail import classify_text
-from ..services.instructions import build_guardrail_instruction, build_rag_instruction
+from ..services.instructions import REFUSED_LABELS, build_guardrail_instruction, build_rag_instruction
 from ..services.rag import retrieve_rag_hit
 from ..services.streamer import stream_chat
 from ..utils.jsonsafe import json_dumps
@@ -240,7 +240,8 @@ class ChatSession:
         self._msg_times.append(now)
         return False
 
-    async def _guardrail_instruction(self, user_msg: str) -> str:
+    async def _classify(self, user_msg: str) -> Tuple[str, bool]:
+        """回傳 (label, degraded)，並把結果送給前端更新狀態列。"""
         # classify_text 內含 transformer 推論（同步），放到執行緒池避免阻塞 event loop
         result = await asyncio.to_thread(classify_text, user_msg)
         label = result.get("label", "NORMAL")
@@ -252,11 +253,11 @@ class ChatSession:
             )
         # 前端只用來更新狀態列，不會當成對話泡泡顯示
         await self.send({"type": "guardrail", "label": label, "degraded": degraded})
-        return build_guardrail_instruction(label, degraded)
+        return label, degraded
 
     async def _rag_instruction(self, user_msg: str) -> str:
         # 同步檔案 I/O + 分詞計分，包 to_thread 避免阻塞 event loop
-        rag_hit = await asyncio.to_thread(retrieve_rag_hit, user_msg, min_score=3)
+        rag_hit = await asyncio.to_thread(retrieve_rag_hit, user_msg)
         if rag_hit:
             logger.info(
                 "RAG HIT session_id=%s score=%s matched_question=%s",
@@ -296,9 +297,11 @@ class ChatSession:
             await self.send({"type": "error", "error": "傳送過於頻繁，請稍候再試。"})
             return
 
-        guardrail_instruction = await self._guardrail_instruction(user_msg)
-        rag_instruction = await self._rag_instruction(user_msg)
-        system_msg = {"role": "system", "content": f"{guardrail_instruction}\n\n{rag_instruction}"}
+        label, degraded = await self._classify(user_msg)
+        parts = [build_guardrail_instruction(label, degraded)]
+        if label not in REFUSED_LABELS:
+            parts.append(await self._rag_instruction(user_msg))
+        system_msg = {"role": "system", "content": "\n\n".join(parts)}
 
         model = payload.get("model")
         model = model.strip() if isinstance(model, str) and model.strip() else None
