@@ -343,8 +343,8 @@ def parse_whitelist(raw: str) -> set[str]:
 # -----------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="backend_ml_guardrail_model.joblib")
-    parser.add_argument("--data", default="backend_ml_data_guardrail_augmented_big.csv")
+    parser.add_argument("--model", default=str(Path(__file__).resolve().parents[1] / "backend_ml_guardrail_model.joblib"))
+    parser.add_argument("--data", default=str(Path(__file__).resolve().parents[1] / "data_set" / "train_full_dataset_v2.csv"))  # 原預設檔案不存在
     parser.add_argument("--embed-model", default="paraphrase-multilingual-MiniLM-L12-v2")
     parser.add_argument("--topk", type=int, default=5)
     parser.add_argument(

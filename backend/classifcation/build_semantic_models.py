@@ -9,17 +9,13 @@ LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 # 你的原始資料檔（每行: 句子,標籤）
 # 路徑改為相對於本腳本位置，從任何工作目錄執行皆可
 _HERE = Path(__file__).resolve().parent
-RAW_PATH = _HERE / "data_set" / "ML_data.csv"
+# 2026-11-26：改用 step09 清理版（含人工困難樣本；ML_data.csv 有誤標的合法通知與大量模板重複）
+RAW_PATH = _HERE / "data_set" / "train_full_dataset_v2.csv"
 MODEL_DIR = _HERE.parent / "semantic_models"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # 讀取兩欄: text,label
-df = pd.read_csv(
-    RAW_PATH,
-    header=None,                # 沒有表頭
-    names=["text", "label"],    # 自訂欄位名
-    encoding="utf-8"
-)
+df = pd.read_csv(RAW_PATH, encoding="utf-8-sig")  # v2 有表頭 text,label
 
 # 清理
 df["text"] = df["text"].astype(str).str.strip()
