@@ -113,6 +113,12 @@
 | 拒答不進歷史 | PROMPT_ATTACK / SPAM 那一輪不寫進對話歷史，避免「先送攻擊、再說照上面做」 |
 | Agent | 攻擊 / 廣告不跑 agent，走一般拒答；`lookup_doc` stub 不再把使用者原文當成工具結果；移除會原樣回傳使用者原文的 `summarize` 工具；工具結果用 `[TOOL_RESULTS]` 標成資料 |
 
+第三輪之後再補的四項（Docker 實測時發現）：
+- compose：inference、backend 加 healthcheck，front `depends_on: backend: condition: service_healthy`（原本後端預熱期間 nginx 回 502）。
+- `/health` 多回 `guardrail_semantic`（ok / unavailable / unknown），語意比對被跳過時 `status` 會是 degraded（原本連不到 HuggingFace 時只留一行 log）。
+- 後端 Dockerfile 拿掉 `build-essential`（依賴都有 wheel，實測不裝也正常）。
+- guardrail 模型或語意庫是 Git LFS 指標檔時，直接報「請 git lfs pull」（原本是 transformers 看不懂的錯誤，最後每句都 UNCERTAIN）。
+
 **Docker 冒煙測試**（`docker/smoke/`，不需要 GPU）：推理服務換成假模型，前端 nginx、後端、真的 guardrail 模型照正式設定跑，`python docker/smoke/ws_smoke.py http://<IP>:8080` 檢查 health、標籤、逐段串流、回覆中 pong、思考不外洩。步驟見 `docs/docker.md` 最後一節。2026-11-26 在 sandbox 跑過兩種輸出格式都 PASS。
 
 **上 GPU 後怎麼確認串流**：直接打推理服務看原始輸出長什麼樣子

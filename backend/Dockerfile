@@ -10,9 +10,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app/backend
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends build-essential \
- && rm -rf /var/lib/apt/lists/*
+# 不需要 build-essential：所有依賴在 Python 3.12 都有現成 wheel（2026-11-26 實測不裝也建置、執行正常）。
+# 日後加入需要編譯的套件、建置時出現 "error: command 'gcc' failed" 再加回：
+#   RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
 
 # 先裝 CPU 版 torch（與 requirements.txt 鎖定版本一致，避免 pip 再去 PyPI 抓 526MB CUDA wheel），
 # 再裝其餘依賴（transformers 系偵測到 torch 已存在即不會重裝）

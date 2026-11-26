@@ -2,7 +2,8 @@
 經前端 nginx 的 WebSocket 跑一輪對話，檢查整套是否正常。結束代碼 0 = 通過。
 
     pip install websockets
-    python docker/smoke/ws_smoke.py http://<IP>:8080
+    python docker/smoke/ws_smoke.py http://<IP>:8080            # 語意比對沒載入只警告
+    python docker/smoke/ws_smoke.py http://<IP>:8080 --strict   # 正式驗收：語意比對也要 ok
 
 請用 IP 或網域而不是 localhost：localhost 在後端 Origin 白名單裡，測不出 nginx 有沒有保留埠號。
 檢查：/health、guardrail 標籤、回覆逐段送出、回覆途中 ping 有 pong、
@@ -60,8 +61,12 @@ async def run(base: str) -> list[str]:
     return errors
 
 
+STRICT = "--strict" in sys.argv
+
+
 def main() -> int:
-    base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    base = args[0] if args else "http://127.0.0.1:8080"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     # 剛 up 完時 nginx 可能先起來、後端還在載入 guardrail 模型（會回 502），最多等 3 分鐘
     health: dict = {}
@@ -73,7 +78,13 @@ def main() -> int:
             health = {"status": f"unreachable ({e})"}
             time.sleep(3)
     print("health:", health)
-    errors = [] if health.get("status") == "ok" else [f"/health 不是 ok：{health}"]
+    errors = []
+    if health.get("llama") != "connected" or health.get("guardrail") != "ok":
+        errors.append(f"推理服務或 guardrail 不正常：{health}")
+    if health.get("guardrail_semantic") not in (None, "ok"):
+        # 語意比對（第三層）沒載入：通常是第一次啟動連不到 HuggingFace。--strict 時算失敗
+        msg = f"guardrail 語意比對沒有載入（guardrail_semantic={health.get('guardrail_semantic')}）"
+        (errors.append(msg) if STRICT else print("WARN:", msg))
     errors += asyncio.run(run(base))
     for e in errors:
         print("FAIL:", e)
