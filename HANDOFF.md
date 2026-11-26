@@ -75,7 +75,7 @@
 
 1. ~~Review 並 merge PR #35~~（已完成）。
 2. ~~在有 GPU 的機器上用 v2 重訓六種方法~~（2026-11-26 已完成，結果見第 6 節）。
-3. **用更新後的 v2 再重訓一次**：v2 在 GPU 重訓之後補了第三批樣本。merge 包含修正版 `run_all_training.ps1` 的 PR 後直接跑，它會一併重建語意庫並做端到端評估。請和第 6 節的數字比較，特別是 hard_eval。
+3. **用更新後的 v2 再重訓一次**：v2 在 GPU 重訓之後補了第三批樣本。直接跑 `run_all_training.ps1`（PR #36 的修正版），它會一併重建語意庫並做端到端評估。請和第 6 節的數字比較，特別是 hard_eval。
 4. **把新模型和語意庫 commit 進倉庫**（Git LFS），上線環境才會拿到新模型：`transformer/backend_ml_ovr_transformer_models_clean/`、`backend/semantic_models/`，以及 `reports/`。
 5. **（可選）OvR 改 4選1**：準確度打平（見第 6 節），只有在需要加快推論時才值得換。4選1 只要 1 次 forward，OvR 要 4 次；上線程式目前只支援 OvR，換的話要改 `guardrail.py`。
 6. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`（以簡體語料為主）。現有模型在 hard_eval 已經 0.97，優先度降低。
