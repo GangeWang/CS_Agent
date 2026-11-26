@@ -3,12 +3,13 @@ Main FastAPI application for CS_Agent backend.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
 import logging
 import asyncio
 from contextlib import asynccontextmanager
 
 from app.routers.ws import router as ws_router
+from app.services import inference_info
+from app.services.context_manager import effective_context_max_tokens
 from app.services.guardrail import classify_text, guardrail_status
 from app.services.streamer import aclose_http_client
 
@@ -48,21 +49,15 @@ async def _warmup_guardrail_model() -> None:
 
 
 async def _warmup_llama_model() -> None:
-    """啟動時 ping 推理服務（settings.llama_api_url），確認模型已載入。"""
-    endpoint = settings.llama_api_url.rstrip("/") + "/health"
-    try:
-        timeout = httpx.Timeout(
-            timeout=settings.request_timeout,
-            connect=settings.connect_timeout,
+    """啟動時 ping 推理服務 /health：確認模型已載入，並記下它回報的 n_ctx（決定上下文預算）。"""
+    status = await inference_info.probe()
+    if status == "connected":
+        logger.info(
+            "Startup warmup: LLAMA service at '%s' reachable, context budget %d tokens",
+            settings.llama_api_url, effective_context_max_tokens(),
         )
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(endpoint)
-        if resp.status_code == 200:
-            logger.info(f"Startup warmup: LLAMA service at '{settings.llama_api_url}' reachable")
-        else:
-            logger.warning(f"Startup warmup (llama) failed: HTTP {resp.status_code} - {resp.text}")
-    except Exception as e:
-        logger.warning(f"Startup warmup (llama) failed: {e}")
+    else:
+        logger.warning("Startup warmup (llama) failed: %s", status)
 
 
 @asynccontextmanager
@@ -108,24 +103,16 @@ async def health():
 
     錯誤細節只進 log，回應不攜帶 exception 字串（避免內部資訊外洩）。
     Returns:
-        dict: status / llama / guardrail
+        dict: status / llama / guardrail / context_max_tokens（實際使用的上下文上限）
     """
     gr = guardrail_status()
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # 確認推理服務的 /health
-            response = await client.get(f"{settings.llama_api_url.rstrip('/')}/health")
-        llama = "connected" if response.status_code == 200 else f"HTTP {response.status_code}"
-    except Exception as e:
-        logger.warning(f"Health check - LLAMA connection failed: {e}")
-        llama = "disconnected"
-
+    llama = await inference_info.probe(timeout=5.0)
     llama_ok = llama == "connected"
     return {
         "status": "ok" if (llama_ok and gr["loaded"]) else "degraded",
         "llama": llama,
         "guardrail": "ok" if gr["loaded"] else "degraded",
+        "context_max_tokens": effective_context_max_tokens(),
     }
 
 # WebSocket 路由

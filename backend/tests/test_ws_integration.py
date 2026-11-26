@@ -137,8 +137,28 @@ def test_agent_mode_streams(make_client):
     assert seen["requests"][-1]["messages"][-1]["content"] == "使用者問題：現在幾點"
 
 
-def test_health_reports_degraded_without_services(make_client):
-    client, _ = make_client(lambda r: httpx.Response(200))
+def test_health_reports_inference_state_and_context(make_client):
+    import app.services.inference_info as info
+
+    def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"status": "ok", "n_ctx": 8192})
+        return httpx.Response(404)
+
+    info.reset()
+    client, _ = make_client(handler)
+    with client:
+        body = client.get("/health").json()
+    info.reset()
+    assert body["llama"] == "connected"
+    assert body["context_max_tokens"] == 8192
+
+
+def test_health_reports_disconnected(make_client):
+    def handler(request):
+        raise httpx.ConnectError("refused")
+
+    client, _ = make_client(handler)
     with client:
         body = client.get("/health").json()
     assert body["status"] == "degraded" and body["llama"] == "disconnected"

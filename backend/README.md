@@ -65,8 +65,8 @@ cp .env.example .env
 - `LLAMA_API_URL`：LLM 推理服務 URL
 - `LLAMA_API_KEY`：若推理服務需要金鑰
 - `MAX_MESSAGE_SIZE`：WebSocket 訊息大小上限
-- `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
-- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：模型上下文視窗與預留輸出 token；預設參考 Ollama `gpt-oss:20b` 的 128K context window，設定為 `131072` 並預留 `4096` token 給輸出，避免 prompt 撐爆模型限制
+- `HISTORY_MAX_LENGTH`：每個 session 在記憶體裡最多保留的訊息數（預設 100，只是防記憶體爆掉的硬上限；送給模型多少歷史由下面的 token 預算決定）
+- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：上下文上限與預留給輸出的 token（預設 `32768` / `4096`）。後端會讀推理服務 `/health` 回報的 `n_ctx`，實際上限取兩者較小值，所以通常不用手動對齊
 - `CONTEXT_STRATEGY`：上下文管理策略，支援 `compress`（預設）或 `window`
 - `CONTEXT_COMPRESS_THRESHOLD_RATIO`：預估上下文達到可用預算多少比例時觸發管理（預設 0.8）
 - `CONTEXT_COMPRESS_KEEP_RECENT_MESSAGES`：壓縮時保留最近幾則原文訊息
@@ -79,7 +79,13 @@ cp .env.example .env
 
 ## 上下文長度保護
 
-後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。預設上下文上限以 Ollama `gpt-oss:20b` 的 128K context window（`128 * 1024 = 131072` tokens）為基準，並透過 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS=4096` 預留輸出空間；超過門檻時可用兩種方案處理：
+後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。上下文上限 = `min(LLAMA_CONTEXT_MAX_TOKENS, 推理服務回報的 n_ctx)`：
+
+- 推理服務的 `n_ctx` 在啟動預熱、每次 `/health`、以及對話時（尚未取得時每 30 秒、已取得時每 10 分鐘）更新
+- 後端 `/health` 會回 `context_max_tokens`，可以直接看目前實際用的上限
+- docker-compose 只要設一個 `LLAMA_N_CTX`（預設 32768），推理服務與後端都吃這個值
+
+再扣掉 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`（最多扣一半）就是可用預算；超過門檻（預設 80%）時可用兩種方案處理：
 
 ### 方案 1：上下文壓縮（`CONTEXT_STRATEGY=compress`，預設）
 

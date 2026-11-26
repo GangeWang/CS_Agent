@@ -23,9 +23,11 @@ class Settings(BaseSettings):
     llama_request_timeout: float = 60.0
     # 預設一次生成最多 token（可視 server 支援調整）
     llama_max_tokens: int = 512
-    # 模型上下文視窗與安全保留量，用於送出前管理歷史上下文
-    # Ollama gpt-oss:20b advertises a 128K context window (128 * 1024).
-    llama_context_max_tokens: int = 131072
+    # 模型上下文上限（tokens），用於送出前管理歷史上下文。
+    # 實際使用 min(此值, 推理服務 /health 回報的 n_ctx)，所以通常不用手動對齊；
+    # 預設 32768 與 docker-compose 的 LLAMA_N_CTX 一致。想刻意用比模型小的預算時才調低。
+    llama_context_max_tokens: int = 32768
+    # 預留給輸出與估算誤差的 tokens（上下文很小時最多只預留一半）
     llama_context_reserved_output_tokens: int = 4096
 
     # Context management: compress 會壓縮舊對話；window 會直接丟棄最舊內容
@@ -40,7 +42,10 @@ class Settings(BaseSettings):
 
     # WebSocket Configuration
     max_message_size: int = 10 * 1024  # 10KB（bytes，以 UTF-8 計）
-    history_max_length: int = 20  # Maximum number of messages to keep in history
+    # 每個 session 在記憶體裡最多保留幾則訊息（防記憶體爆掉的硬上限）。
+    # 真正決定送多少歷史給模型的是上面的 token 預算與壓縮策略；這個值要夠大，
+    # 否則舊對話會在壓縮之前就被直接丟掉（先前預設 20 則 = 10 輪，壓縮幾乎不會觸發）。
+    history_max_length: int = 100
     # 每個連線的訊息速率限制：window 秒內最多 messages 則（防一次性灌爆 guardrail/LLM 資源）
     ws_rate_limit_messages: int = 30
     ws_rate_limit_window_seconds: float = 60.0

@@ -22,6 +22,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import settings
 from ..services.agent.runner import run_agent_stream
+from ..services import inference_info
 from ..services.context_manager import manage_context
 from ..services.guardrail import classify_text
 from ..services.rag import retrieve_rag_hit
@@ -397,6 +398,9 @@ async def ws_chat(websocket: WebSocket) -> None:
             context_strategy = payload.get("context_strategy")
             if not isinstance(context_strategy, str):
                 context_strategy = None
+
+            # 還不知道推理服務的 n_ctx 時（例如推理服務比後端晚啟動）補問一次，讓上下文預算對齊實際模型
+            await inference_info.refresh_if_stale()
 
             # compress 策略會呼叫 LLM 做摘要（async，不阻塞 event loop）
             history, context_meta = await manage_context(

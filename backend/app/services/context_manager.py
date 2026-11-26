@@ -4,12 +4,10 @@ import logging
 from typing import Dict, List, Tuple
 
 from ..config import settings
-from .streamer import generate_text
+from . import inference_info
+from .streamer import SYSTEM_PROMPT, generate_text
 
 logger = logging.getLogger(__name__)
-
-# 預設上下文上限（tokens）；部署可透過 LLAMA_CONTEXT_MAX_TOKENS 覆蓋
-DEFAULT_CONTEXT_MAX_TOKENS = 128 * 1024
 
 SUMMARY_ROLE = "system"
 SUMMARY_PREFIX = "[CONVERSATION_SUMMARY]"
@@ -34,14 +32,22 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
     return total
 
 
-def _configured_context_max_tokens() -> int:
-    # 預設 128K tokens；VRAM/RAM 受限時可透過 LLAMA_CONTEXT_MAX_TOKENS 調低
-    return max(256, int(getattr(settings, "llama_context_max_tokens", DEFAULT_CONTEXT_MAX_TOKENS)))
+def effective_context_max_tokens() -> int:
+    """
+    模型上下文上限 = min(LLAMA_CONTEXT_MAX_TOKENS, 推理服務 /health 回報的 n_ctx)。
+
+    推理服務還沒回報（沒連上或舊版）時只用設定值；設定值預設 32768，與 docker-compose 的 LLAMA_N_CTX 一致。
+    """
+    configured = max(256, int(settings.llama_context_max_tokens))
+    reported = inference_info.reported_n_ctx()
+    return min(configured, reported) if reported else configured
 
 
 def _context_budget_tokens() -> int:
-    max_context = _configured_context_max_tokens()
-    reserved = max(0, int(getattr(settings, "llama_context_reserved_output_tokens", 4096)))
+    max_context = effective_context_max_tokens()
+    reserved = max(0, int(settings.llama_context_reserved_output_tokens))
+    # 小 context（例如 n_ctx=4096）時，預留量不能把整個預算吃光：最多預留一半
+    reserved = min(reserved, max_context // 2)
     return max(128, max_context - reserved)
 
 
@@ -173,7 +179,12 @@ async def manage_context(
     if selected_strategy not in {"compress", "window"}:
         selected_strategy = "compress"
 
-    fixed_messages = system_messages + [{"role": "user", "content": current_user_msg}]
+    # streamer 會在最前面加上 SYSTEM_PROMPT，估算時一併算進去
+    fixed_messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + system_messages
+        + [{"role": "user", "content": current_user_msg}]
+    )
     before_tokens = estimate_tokens(fixed_messages + history)
 
     if before_tokens <= _threshold_tokens():
