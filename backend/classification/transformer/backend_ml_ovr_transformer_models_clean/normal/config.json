@@ -27,7 +27,6 @@
   "pooler_num_fc_layers": 3,
   "pooler_size_per_head": 128,
   "pooler_type": "first_token_transform",
-  "problem_type": "single_label_classification",
   "tie_word_embeddings": true,
   "transformers_version": "5.13.1",
   "type_vocab_size": 2,
