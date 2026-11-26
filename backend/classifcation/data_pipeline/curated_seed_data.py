@@ -214,3 +214,18 @@ HARD_EVAL = [
 ("兼職日結，在家滑手機就能賺，私訊我", "SPAM"),
 ("恭喜中獎！點 https://tinyurl.com/abc 領取", "SPAM"),
 ]
+
+# ---- 第二批人工樣本（curated_seed_extra.py）----
+from curated_seed_extra import (  # noqa: E402
+    ABUSIVE_EXTRA,
+    HARD_EVAL_EXTRA,
+    NORMAL_EXTRA,
+    PROMPT_ATTACK_EXTRA,
+    SPAM_EXTRA,
+)
+
+NORMAL = NORMAL + NORMAL_EXTRA
+ABUSIVE = ABUSIVE + ABUSIVE_EXTRA
+PROMPT_ATTACK = PROMPT_ATTACK + PROMPT_ATTACK_EXTRA
+SPAM = SPAM + SPAM_EXTRA
+HARD_EVAL = HARD_EVAL + HARD_EVAL_EXTRA
