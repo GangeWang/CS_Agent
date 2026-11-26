@@ -1,8 +1,17 @@
+"""
+Guardrail：規則 → 4 個 OvR transformer → 語意比對。
+
+import 本模組不會載入 torch / transformers / sentence-transformers，也不會改 torch 的執行緒數；
+這些都延遲到第一次分類（或 main.py 啟動預熱）時才做。好處：
+- 只用到規則（rule_first）或只想跑測試時，不需要安裝或載入深度學習套件
+- 啟動與測試不會因為 import 就吃掉數秒和數百 MB 記憶體
+"""
 from __future__ import annotations
 
+import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional
 from urllib.parse import urlparse
 from collections import defaultdict
 import json
@@ -11,23 +20,30 @@ import re
 import os
 
 import numpy as np
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from sentence_transformers import SentenceTransformer
+
+if TYPE_CHECKING:  # 只供型別標註，執行時不 import
+    import torch
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
 
 # =============================
 # Device config (default CPU) -- change with env GUARDRAIL_DEVICE=cuda
 # =============================
-RequestedDevice = os.environ.get("GUARDRAIL_DEVICE", "cpu").lower()
-if RequestedDevice in ("cuda", "gpu") and torch.cuda.is_available():
-    DEVICE = torch.device("cuda")
-else:
-    DEVICE = torch.device("cpu")
+@lru_cache(maxsize=1)
+def get_device() -> "torch.device":
+    """第一次呼叫時才 import torch、決定裝置並設定 CPU 執行緒數（GUARDRAIL_DEVICE / GUARDRAIL_CPU_THREADS）。"""
+    import torch
 
-torch.set_num_threads(int(os.environ.get("GUARDRAIL_CPU_THREADS", 4)))
-logger.info(f"guardrail: using DEVICE={DEVICE}, cpu_threads={torch.get_num_threads()}")
+    requested = os.environ.get("GUARDRAIL_DEVICE", "cpu").lower()
+    if requested in ("cuda", "gpu") and torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    torch.set_num_threads(int(os.environ.get("GUARDRAIL_CPU_THREADS", 4)))
+    logger.info("guardrail: using DEVICE=%s, cpu_threads=%s", device, torch.get_num_threads())
+    return device
 
 # =============================
 # Labels / Paths / Types
@@ -64,12 +80,18 @@ SEMANTIC_TEXTS_PATH = _ensure_path(semantic_path / "semantic_texts.joblib")
 SEMANTIC_LABELS_PATH = _ensure_path(semantic_path / "semantic_labels.joblib")
 SEMANTIC_EMB_PATH = _ensure_path(semantic_path / "semantic_embeddings.npy")
 
-# Debug log right after normalization (helps startup diagnostics)
-logger.info(f"guardrail: MODEL_DIR={MODEL_DIR!r} (exists={MODEL_DIR.exists()})")
-logger.info(f"guardrail: CONFIG_PATH={CONFIG_PATH!r} (exists={CONFIG_PATH.exists()})")
-logger.info(f"guardrail: SEMANTIC_TEXTS_PATH={SEMANTIC_TEXTS_PATH!r} (exists={SEMANTIC_TEXTS_PATH.exists()})")
-logger.info(f"guardrail: SEMANTIC_LABELS_PATH={SEMANTIC_LABELS_PATH!r} (exists={SEMANTIC_LABELS_PATH.exists()})")
-logger.info(f"guardrail: SEMANTIC_EMB_PATH={SEMANTIC_EMB_PATH!r} (exists={SEMANTIC_EMB_PATH.exists()})")
+
+
+def _log_resource_paths() -> None:
+    """載入資源前記錄路徑與是否存在（啟動排查用；不在 import 時做）。"""
+    for name, p in (
+        ("MODEL_DIR", MODEL_DIR),
+        ("CONFIG_PATH", CONFIG_PATH),
+        ("SEMANTIC_TEXTS_PATH", SEMANTIC_TEXTS_PATH),
+        ("SEMANTIC_LABELS_PATH", SEMANTIC_LABELS_PATH),
+        ("SEMANTIC_EMB_PATH", SEMANTIC_EMB_PATH),
+    ):
+        logger.info("guardrail: %s=%r (exists=%s)", name, p, p.exists())
 
 ModelMap = Dict[str, Any]
 ThresholdMap = Dict[str, float]
@@ -154,6 +176,11 @@ URL_REGEX = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 # =============================
 # 模型資源載入狀態：載入失敗時 /health 需能顯示 degraded，而非 silent fail-open。
 _GUARDRAIL_STATE = {"loaded": False, "error": None}
+
+# 載入失敗後的冷卻時間：lru_cache 不快取例外，沒有冷卻的話模型壞掉時「每一則訊息」都會重新載入一次
+# （可能是好幾秒的磁碟 I/O），冷卻期間直接走降級（規則）流程。
+LOAD_RETRY_COOLDOWN_SECONDS = float(os.environ.get("GUARDRAIL_LOAD_RETRY_SECONDS", "30"))
+_LOAD_FAILURE: Dict[str, Any] = {"at": None, "error": None}
 
 
 def guardrail_status() -> dict:
@@ -300,8 +327,9 @@ def _predict_ovr_transformer(
     tokenizers: Dict[str, Any],
     thresholds: ThresholdMap,
     text: str,
-    device: torch.device,
+    device: "torch.device",
     max_len: int,
+    shared_tokenizer: Any = None,
 ) -> Tuple[str, float, Dict[str, float], Dict[str, bool]]:
     """
     Run each transformer binary model and return:
@@ -309,34 +337,28 @@ def _predict_ovr_transformer(
       - confidence (prob of selected or top)
       - probs: map label -> pos-prob
       - pass_flags: map label -> bool (pos-prob >= threshold)
+
+    四個二元模型是不同的權重，沒辦法合併成一次 forward；但它們從同一個預訓練模型微調，
+    tokenizer 相同時（shared_tokenizer）只 tokenize 一次、只搬一次裝置。
     """
+    import torch
+
     probs: Dict[str, float] = {}
     pass_flags: Dict[str, bool] = {}
 
-    # single example -> tokenize per model (tokenizer may differ by model type)
-    for lb in LABELS:
-        tokenizer = tokenizers[lb]
-        model = models[lb]
+    def _encode(tok: Any) -> Dict[str, Any]:
+        enc = tok(text, truncation=True, max_length=max_len, padding=True, return_tensors="pt")
+        return {k: v.to(device) for k, v in enc.items()}
 
-        enc = tokenizer(
-            text,
-            truncation=True,
-            max_length=max_len,
-            padding=True,
-            return_tensors="pt",
-        )
-        # Move tensors to desired device
-        enc = {k: v.to(device) for k, v in enc.items()}
+    shared_enc = _encode(shared_tokenizer) if shared_tokenizer is not None else None
 
-        # inference_mode is preferred on CPU for performance/low memory
-        with torch.inference_mode():
-            out = model(**enc)
-            logits = out.logits  # shape [1, num_labels] (num_labels==2)
-            probs_arr = torch.softmax(logits, dim=1).cpu().numpy()[0]
-            prob_pos = float(probs_arr[1])
-
-        probs[lb] = prob_pos
-        pass_flags[lb] = prob_pos >= float(thresholds.get(lb, 0.5))
+    with torch.inference_mode():
+        for lb in LABELS:
+            enc = shared_enc if shared_enc is not None else _encode(tokenizers[lb])
+            logits = models[lb](**enc).logits  # shape [1, 2]
+            prob_pos = float(torch.softmax(logits, dim=1)[0, 1].item())
+            probs[lb] = prob_pos
+            pass_flags[lb] = prob_pos >= float(thresholds.get(lb, 0.5))
 
     passed = [lb for lb in LABELS if pass_flags[lb]]
     if passed:
@@ -348,11 +370,29 @@ def _predict_ovr_transformer(
     return "UNCERTAIN", probs[best_any], probs, pass_flags
 
 
+def _same_tokenizer(tokenizers: Dict[str, Any]) -> Any:
+    """四個 tokenizer 的類別與詞表都相同時回傳其中一個，否則 None（逐一 tokenize）。"""
+    toks = [tokenizers[lb] for lb in LABELS]
+    first = toks[0]
+    try:
+        vocab = first.get_vocab()
+        if all(type(t) is type(first) and t.get_vocab() == vocab for t in toks[1:]):
+            return first
+    except Exception:  # 自訂 tokenizer 沒有 get_vocab 等情況
+        pass
+    return None
+
+
 # =============================
 # Load resources (Transformer models + semantic resources)
 # =============================
 @lru_cache(maxsize=1)
 def _load_guardrail_resources():
+    # 重量級套件在這裡才 import（見模組說明）
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+    _log_resource_paths()
+
     # 1) OVR config
     cfg_path = Path(CONFIG_PATH)
     if not cfg_path.exists():
@@ -365,7 +405,7 @@ def _load_guardrail_resources():
     semantic_topk = int(cfg.get("semantic_topk", 5))
 
     # 2) Load transformer models + tokenizers per label
-    device = DEVICE  # use global DEVICE (CPU by default)
+    device = get_device()  # CPU by default
     models: ModelMap = {}
     tokenizers: Dict[str, Any] = {}
 
@@ -397,6 +437,8 @@ def _load_guardrail_resources():
             corpus_texts = _joblib.load(SEMANTIC_TEXTS_PATH)
             corpus_labels = _joblib.load(SEMANTIC_LABELS_PATH)
             corpus_emb = np.load(SEMANTIC_EMB_PATH)
+            from sentence_transformers import SentenceTransformer
+
             embedder = SentenceTransformer(
                 embedding_model_name,
                 device="cpu"
@@ -425,6 +467,7 @@ def _load_guardrail_resources():
     return {
         "models": models,
         "tokenizers": tokenizers,
+        "shared_tokenizer": _same_tokenizer(tokenizers),
         "thresholds": thresholds,
         "max_len": max_len,
         "embedder": embedder,
@@ -437,9 +480,25 @@ def _load_guardrail_resources():
     }
 
 
+def _get_resources():
+    """取得已載入的資源；最近一次載入失敗還在冷卻期內時，不重試、直接拋出同一個錯誤。"""
+    failed_at = _LOAD_FAILURE["at"]
+    if failed_at is not None and time.monotonic() - failed_at < LOAD_RETRY_COOLDOWN_SECONDS:
+        raise RuntimeError(f"guardrail resources unavailable (retry cooldown): {_LOAD_FAILURE['error']}")
+    try:
+        rs = _load_guardrail_resources()
+    except Exception as e:
+        _LOAD_FAILURE["at"] = time.monotonic()
+        _LOAD_FAILURE["error"] = str(e)
+        raise
+    _LOAD_FAILURE["at"] = None
+    _LOAD_FAILURE["error"] = None
+    return rs
+
+
 def _semantic_predict(
     text: str,
-    embedder: SentenceTransformer,
+    embedder: "SentenceTransformer",
     corpus_emb: np.ndarray,
     corpus_texts: List[str],
     corpus_labels: List[str],
@@ -478,7 +537,7 @@ def classify_text(text: str) -> dict:
     並以 available=False 標記，呼叫端不得視為 NORMAL。
     """
     try:
-        rs = _load_guardrail_resources()
+        rs = _get_resources()
         models = rs["models"]
         tokenizers = rs["tokenizers"]
         thresholds = rs["thresholds"]
@@ -513,6 +572,7 @@ def classify_text(text: str) -> dict:
             text=text,
             device=device,
             max_len=max_len,
+            shared_tokenizer=rs.get("shared_tokenizer"),
         )
 
         if ml_label != "UNCERTAIN":

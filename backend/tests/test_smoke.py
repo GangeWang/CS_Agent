@@ -152,6 +152,39 @@ def test_guardrail_status_reflects_failure(guardrail, monkeypatch):
     assert st["loaded"] is False and st["error"]
 
 
+def test_guardrail_load_failure_cooldown(guardrail, monkeypatch):
+    """模型載入失敗後，冷卻期內不再每則訊息都重新載入。"""
+    calls = []
+
+    def _counting_broken_load():
+        calls.append(1)
+        raise RuntimeError("missing model")
+
+    monkeypatch.setattr(guardrail, "_load_guardrail_resources", _counting_broken_load)
+    monkeypatch.setitem(guardrail._LOAD_FAILURE, "at", None)
+    monkeypatch.setattr(guardrail, "LOAD_RETRY_COOLDOWN_SECONDS", 60.0)
+    for _ in range(3):
+        assert guardrail.classify_text("hello")["available"] is False
+    assert len(calls) == 1
+
+    monkeypatch.setattr(guardrail, "LOAD_RETRY_COOLDOWN_SECONDS", 0.0)
+    guardrail.classify_text("hello")
+    assert len(calls) == 2  # 冷卻結束後會重試
+
+
+def test_guardrail_import_is_lightweight():
+    """import guardrail 不可載入 torch / transformers（延遲到第一次分類）。"""
+    import subprocess
+
+    code = (
+        "import sys; import app.services.guardrail as g; "
+        "assert 'torch' not in sys.modules and 'transformers' not in sys.modules "
+        "and 'sentence_transformers' not in sys.modules, sorted(m for m in sys.modules if 'torch' in m)"
+    )
+    subprocess.run([sys.executable, "-c", code], cwd=BACKEND_DIR, check=True,
+                   env={**os.environ, "PYTHONPATH": str(BACKEND_DIR)})
+
+
 # ---------- RAG ----------
 def test_rag_exact_and_ngram(tmp_path, monkeypatch):
     import app.services.rag as rag

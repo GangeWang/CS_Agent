@@ -30,15 +30,15 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))  # backend/，讓 app.services.guardrail 可 import
 import common as C  # noqa: E402
 
-# 必須在 import guardrail 之前設定（guardrail 在 import 時讀取）
+# 必須在 guardrail 第一次載入模型之前設定（get_device() 第一次呼叫時讀取）
 os.environ.setdefault("GUARDRAIL_DEVICE", "cuda")
 
 
 def run(texts, y_true, title):
-    from app.services.guardrail import DEVICE, classify_text
+    from app.services.guardrail import classify_text, get_device
 
     n = len(texts)
-    print(f"[{title}] {n} 句，guardrail device = {DEVICE}", flush=True)
+    print(f"[{title}] {n} 句，guardrail device = {get_device()}", flush=True)
     outs = []
     for i, t in enumerate(texts, 1):
         outs.append(classify_text(str(t)))
