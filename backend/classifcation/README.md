@@ -291,7 +291,7 @@ Windows PowerShell 5.1 下，python 的警告會顯示成紅字 `NativeCommandEr
 
 處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（10,755 筆：NORMAL 4,887 / ABUSIVE 3,649 / SPAM 1,464 / PROMPT_ATTACK 755）。
 每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` + `curated_seed_extra.py` 的 537 筆人工撰寫樣本（NORMAL 287 / ABUSIVE 104 / PROMPT_ATTACK 88 / SPAM 58；涵蓋電商、物流、電信、3C、金融保險、訂閱、旅遊餐飲、教育，重點是長句與含敏感字眼的困難負樣本、有情緒但無髒話的抱怨、中文客服情境的注入與越權）。第三批 `curated_seed_long.py` 再補 185 句 30 字以上的 NORMAL 與 37 句英文樣本（四類都有），共 759 筆人工樣本。
-`data_set/hard_eval.csv` 為困難評估集（47 筆，不進訓練），重訓後請以它驗證誤判。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
+`data_set/hard_eval.csv` 為困難評估集（不進訓練），重訓後請以它驗證誤判。原本 47 筆，2026-11-26 以 `data_pipeline/curated_hard_eval.py` 擴充到 199 筆（NORMAL 79 / ABUSIVE 50 / PROMPT_ATTACK 40 / SPAM 30），擴充前後的分數不能直接比較。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
 
 已知限制 / 後續：
 - NORMAL 長句仍偏少（≥30 字 312 筆，原本 116 筆；其餘 4,500+ 筆是 ML_data 短模板句），長度捷徑只是減輕、尚未消除；重訓後請特別看 hard_eval 裡長句 NORMAL 的表現
