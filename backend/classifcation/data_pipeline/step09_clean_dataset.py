@@ -5,7 +5,7 @@
 輸出：
   data_set/train_full_dataset_v2.csv   清理後訓練集（訓練腳本 DATA_PATH 指向此檔）
   data_set/removed_rows_v2.csv         被移除的每一筆 + 原因（供人工複查）
-  data_set/hard_eval.csv               困難評估集（不進訓練，重訓後用來驗證誤判）
+  data_set/hard_eval.csv               困難評估集（不進訓練，重訓後用來驗證誤判；199 句，見 curated_hard_eval.py）
 
 清理規則（2026-11-26 語料審查結論，見 classifcation/README.md「語料審查」）：
   1) label 正規化：小寫 spam → SPAM（原本訓練腳本 isin(LABELS) 會整批丟掉 592 筆）
