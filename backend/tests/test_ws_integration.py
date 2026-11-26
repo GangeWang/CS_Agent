@@ -1,6 +1,7 @@
 """WebSocket 端到端：真的 FastAPI app + 真的 httpx 串流，推理服務用 httpx.MockTransport 模擬。
 
-guardrail 模型與推理服務都不需要真的存在（取代原本 backend/tests_smoke.py 要另外起 uvicorn 的整合測試）。
+guardrail 模型與推理服務都不需要真的存在。取代原本 backend/tests_smoke.py
+（要另外起一支 uvicorn、連到關閉的埠模擬推理服務離線）的整合層。
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import json
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 FINAL = "<|channel|>final<|message|>"
 
@@ -124,6 +126,10 @@ def test_end_conversation_sends_summary(make_client):
             _recv_until(ws, {"done", "error"})
             ws.send_text(json.dumps({"type": "end_conversation"}))
             msgs = _recv_until(ws, {"conversation_ended"})
+            # 伺服器以 1000（正常關閉）結束連線
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_text()
+            assert closed.value.code == 1000
     assert msgs[0] == {"type": "conversation_summary", "reason": "manual", "summary": "摘要內容"}
     assert "我要退貨" in seen["requests"][-1]["prompt"]
 

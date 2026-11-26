@@ -150,7 +150,22 @@ curl http://localhost:8000/health   # {"status":"ok","llama":"connected"}
   - `LLAMA_API_URL` / `LLAMA_API_KEY`
   - `CORS_ORIGINS`
   - `MAX_MESSAGE_SIZE` / `HISTORY_MAX_LENGTH`
-- 前端可用 `VITE_WS_URL` 或 `VITE_WS_PORT` 覆蓋 WebSocket 連線。
+  - `LLAMA_CONTEXT_MAX_TOKENS`（實際取它與推理服務回報 `n_ctx` 的較小值）、`RAG_MIN_SCORE`
+- docker-compose 的上下文長度只要設一個 `LLAMA_N_CTX`（預設 32768）。
+- 前端預設走同源 `/ws/chat`（vite proxy / nginx 反代），只有沒有反代時才需要 `VITE_WS_URL` 或 `VITE_WS_PORT`。
+
+---
+
+## 測試與 CI
+
+每次 push 到 master 或開 PR，GitHub Actions（`.github/workflows/ci.yml`）會跑：
+
+| 部分 | 本機指令 | 說明 |
+|---|---|---|
+| 後端 | `cd backend && pytest -q tests/` | 不需要 torch、模型或推理服務；WebSocket 端到端用假的推理服務 |
+| 後端模型載入 | `cd backend && pytest -q tests/test_guardrail_models.py` | 需要 torch + transformers，用極小的隨機 BERT |
+| 推理服務 | `cd LLM_gen && pytest -q tests` | 用假的 `llama_cpp`，不需要 GPU |
+| 前端 | `cd Front && npm run lint && npm test && npm run build` | vitest 測狀態列邏輯 |
 
 ---
 
@@ -159,7 +174,8 @@ curl http://localhost:8000/health   # {"status":"ok","llama":"connected"}
 - 後端說明：`backend/README.md`
 - 前端說明：`Front/README.md`
 - LLM 服務：`LLM_gen/README.md`
-- 本次程式審查：`CODE_REVIEW_2026-04-28.md`
+- 交接與目前狀態：`HANDOFF.md`
+- 舊的程式審查：`docs/archive/`
 
 ---
 

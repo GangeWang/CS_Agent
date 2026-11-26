@@ -125,7 +125,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 pytest tests/          # 目前 51 個，全部通過
 ```
 
-> 另外還有 `backend/tests_smoke.py`（較早的整合煙霧測試，會起一支 uvicorn 走完 WebSocket 流程，`python tests_smoke.py` 直接執行），跟 `tests/` 是兩套東西，這次沒有改它。
+> 舊的 `backend/tests_smoke.py`（要另外起一支 uvicorn 的整合煙霧測試）已改寫成 `tests/test_ws_integration.py` 並刪除，現在只有 `tests/` 一套。
 
 ---
 
