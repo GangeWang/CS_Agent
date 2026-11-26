@@ -2,7 +2,7 @@
 
 本目錄提供 CS_Agent 的 **FastAPI 後端**，負責 **WebSocket 聊天會話、Guardrail 文字分類、LLM 串流推理** 與基礎健康檢查。
 
-> 本文件**不覆蓋** `backend/classifcation/` 的細節。
+> 本文件**不覆蓋** `backend/classification/` 的細節。
 
 ---
 
@@ -29,7 +29,7 @@ backend/
 │   └── services/
 │       ├── guardrail.py     # 文字分類
 │       └── streamer.py      # LLM 串流請求
-├── classifcation/           # 分類資料/訓練相關（另行維護）
+├── classification/           # 分類資料/訓練相關（另行維護）
 ├── requirements.txt
 └── .env.example
 ```

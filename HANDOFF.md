@@ -53,8 +53,8 @@
 - **推理服務**（`LLM_gen/server_llama.py`）：client 斷線時停止生成。
 - **UNCERTAIN 指令**（`routers/ws.py`，第四批樣本的 PR）：模型正常但四類都沒過門檻時，原本走一般回覆；199 句 hard_eval 上這 6 句有 4 句是 PROMPT_ATTACK。改成 `[GuardrailLabel=UNCERTAIN]` 保守指令：照常回答一般問題、不滿時先同理，但不透露設定、不改角色、不給他人個資、不因自稱主管就做帳務異動。
 
-### 3.2 訓練資料（`backend/classifcation/`）
-- 舊資料的主要問題（完整內容見 `classifcation/README.md` 的「語料審查與清理」一節）：
+### 3.2 訓練資料（`backend/classification/`）
+- 舊資料的主要問題（完整內容見 `classification/README.md` 的「語料審查與清理」一節）：
   - 592 筆小寫 `spam` 被訓練腳本整批丟掉。
   - ABUSIVE 有 90% 是英文維基討論頁的翻譯。
   - PROMPT_ATTACK 有 1,553 筆是缺少圖片的多模態題。
@@ -73,7 +73,7 @@
   - 英文為主的樣本從 75 筆增加到 165 筆。全部跑過 `rule_first`，沒有一句被規則層攔下。
 - `data_set/hard_eval.csv`：困難評估集，**不進訓練**。重訓後最重要的就是看這份的成績。原本 47 句，後來用 `data_pipeline/curated_hard_eval.py` 擴充到 199 句（NORMAL 79 / ABUSIVE 50 / PROMPT_ATTACK 40 / SPAM 30），依情境分組：長句、容易誤判的字眼、轉貼可疑訊息、官方網址、客氣但急、對 AI 好奇、英文、反諷、冒充權限、套取他人資料、角色扮演越獄、離題閒聊等。
 
-### 3.3 訓練腳本（`backend/classifcation/`）
+### 3.3 訓練腳本（`backend/classification/`）
 - 新增 `common.py`，六支腳本共用同一份資料、同一個切分（seed 42）、同一套評估，輸出路徑也固定下來。
 - **最嚴重的 bug**：輸出路徑原本是相對 CWD，重訓後模型寫不到上線讀取的位置，上線一直是舊模型，而且不會報錯。
 - OvR 改為以上線決策規則組合成 4 類結果再評估，可以直接和 4選1 比較。
@@ -107,7 +107,7 @@
 4. **用加入第四批樣本的 v2 再重訓一次**：`.\run_all_training.ps1`（上次全部約 9 分鐘），把比較表和上線流程的錯誤清單（`reports\pipeline.json` 的 `hard_eval.errors`）貼回來。
    - 第四批樣本是針對 hard_eval 判錯的情境寫的，所以**之後 hard_eval 比較像開發集**，分數會偏樂觀。重點看兩件事：上次錯的 17 句有沒有改善，以及原本答對的句子有沒有因此被改錯（尤其 NORMAL 對照組的情境）。
    - sandbox 先用 TF-IDF 跑過，hard_eval 從 0.780 / 0.732 進步到 0.824 / 0.813（4選1 / OvR），見第 6 節最後。
-5. **把新模型和語意庫 commit 進倉庫**（Git LFS），上線環境才會拿到新模型。等第 4 點重訓完、確認沒有退步再 commit。上線只需要：`backend/classifcation/transformer/backend_ml_ovr_transformer_models_clean/`、`backend/semantic_models/`，另外建議一併 commit `backend/classifcation/reports/` 留存成績。checkpoints 已在 .gitignore。
+5. **把新模型和語意庫 commit 進倉庫**（Git LFS），上線環境才會拿到新模型。等第 4 點重訓完、確認沒有退步再 commit。上線只需要：`backend/classification/transformer/backend_ml_ovr_transformer_models_clean/`、`backend/semantic_models/`，另外建議一併 commit `backend/classification/reports/` 留存成績。checkpoints 已在 .gitignore。
 6. **建立一份新的盲測集**：目前的訓練樣本和 hard_eval 都是同一個作者（Claude）寫的，句型和用詞習慣很接近，hard_eval 的分數會高估真實表現。最可靠的是由負責人自己寫 30～50 句，或等資料庫建好後從真實客服對話抽樣標註，而且**寫好後不要拿來補訓練樣本**，只用來量測。
 7. **長度捷徑**：30 字以上的訊息裡，NORMAL 只佔 14%（350 / 2,552）。199 句 hard_eval 出現了反方向的捷徑：不帶髒話的長篇抱怨（冰箱延期那句）被判成 NORMAL，因為以前的長句 ABUSIVE 幾乎都帶髒話。第四批補了 36 句長篇抱怨。**暫時不下採樣短模板 NORMAL**，等第 4 點重訓後再看。
 8. **OvR 與 4選1**：上線維持 OvR（負責人決定）。199 句 hard_eval 上 Transformer 4選1 是 0.927、OvR 是 0.913、上線流程是 0.918，差距約 3 句；而同一份資料重訓兩次，Transformer 4選1 的 test 就從 0.986 變成 0.995，差距在訓練隨機性的範圍內。第四批重訓後再比一次；4選1 的好處是推論只要 1 次 forward（OvR 要 4 次），但上線程式目前只支援 OvR。
@@ -121,7 +121,7 @@
 ## 5. 怎麼重訓與驗證
 
 ```powershell
-cd backend\classifcation
+cd backend\classification
 .\run_all_training.ps1                       # 六種方法 → 重建語意庫 → 上線流程評估 → 比較表，最後列出每一步成功或失敗
 .\run_all_training.ps1 -SkipTest             # 同上，但端到端評估只跑 hard_eval（較快）
 python compare_reports.py                    # 只看比較表
@@ -251,7 +251,7 @@ Transformer 要等負責人在 GPU 上重訓（第 4 節第 4 點）。sandbox �
 | # | 項目 | 備註 |
 |---|---|---|
 | 6 | 對話歷史存在單一行程的記憶體（TTLCache），重啟就消失，無法多 worker / 水平擴展 | **等 DB 建好再處理**；存取已集中在 `services/session_store.py` |
-| 13 | `classifcation/` 裡有約 100MB 的原始 CSV 和中間產物；目錄名 `classifcation` 拼錯；`Front/style.txt` 殘留；`backend/expan.py`、`backend/test.py` 是已失效的 Ollama 時代腳本 | 第二輪之後另開 PR，一次改乾淨 |
+| 13 | `classification/` 裡有約 100MB 的原始 CSV 和中間產物；目錄名 `classification` 拼錯；`Front/style.txt` 殘留；`backend/expan.py`、`backend/test.py` 是已失效的 Ollama 時代腳本 | 第二輪之後另開 PR，一次改乾淨 |
 | — | 前端 `App.jsx` 仍有一個既有的 lint warning（`connectWs` 的 hooks 依賴） | 不影響功能 |
 
 ---
@@ -272,7 +272,7 @@ backend/
 ├── tests/                            pytest：test_smoke、test_ws_integration（端到端）、test_context、test_rag、
 │                                     test_guardrail_models（需要 torch）、test_training_common
 ├── tools/eval_rag.py                 RAG 命中率與誤命中評估
-└── classifcation/
+└── classification/
     ├── README.md                     模型結果、語料審查結論、訓練與評估說明
     ├── common.py                     ★ 六種方法共用：資料、切分、門檻、決策、報告、輸出路徑
     ├── run_all_training.ps1          一鍵重訓 + 評估 + 比較

@@ -9,7 +9,7 @@
 - 共用切分的 test（common.split_dataset）；注意若上線模型不是用 v2 + 本切分訓練的，test 可能與其訓練資料重疊
 
 用法（於任意目錄執行，需 torch / transformers / sentence-transformers 與 LFS 模型檔）：
-    python backend/classifcation/evaluate_guardrail_pipeline.py [--skip-test]
+    python backend/classification/evaluate_guardrail_pipeline.py [--skip-test]
 報告存 reports/pipeline.json（含各 stage 命中比例與錯誤樣本）。
 
 上線 guardrail 預設用 CPU；本腳本在沒有設定 GUARDRAIL_DEVICE 時改用 cuda（沒有 GPU 會自動退回 CPU），

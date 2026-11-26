@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """把 reports/*.json 並排成一張表，比較六種方法（與上線流程）在同一份 test / hard_eval 上的表現。
 
-    python backend/classifcation/compare_reports.py
+    python backend/classification/compare_reports.py
 
 OvR 的分數是「4 個二元模型以上線決策規則組合後」的 4 類結果，可與 4選1 直接比較；
 uncertain 欄是 OvR 沒有任何類別過門檻的比例（上線會再交給語意階段）。

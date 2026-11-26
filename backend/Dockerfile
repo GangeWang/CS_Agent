@@ -20,7 +20,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir -r requirements.txt
 
-# 應用程式碼；classifcation（guardrail 模型）、semantic_models、app/data（rag_db）
+# 應用程式碼；classification（guardrail 模型）、semantic_models、app/data（rag_db）
 # 由 compose 以 volume 掛載，不打包進 image（重訓模型免重建 image）
 COPY app ./app
 

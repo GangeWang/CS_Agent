@@ -54,7 +54,7 @@ services:
       GUARDRAIL_CPU_THREADS: "4"
     volumes:
       # guardrail OvR 模型（重訓後不用重建 image）
-      - ./backend/classifcation:/app/backend/classifcation:ro
+      - ./backend/classification:/app/backend/classification:ro
       # 語意庫（semantic_texts/labels/embeddings）
       - ./backend/semantic_models:/app/backend/semantic_models:ro
       # RAG 知識庫

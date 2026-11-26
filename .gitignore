@@ -62,10 +62,10 @@ node_modules/
 /models/
 
 # --- 分類模型：腳本/資料集/最終模型/README 入庫；中間產物不入庫 ---
-backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/vocab.joblib
-backend/classifcation/transformer/backend_ml_ovr_transformer_models_clean/**/training_args.bin
+backend/classification/BILSTM/backend_ml_ovr_bilstm_models/vocab.joblib
+backend/classification/transformer/backend_ml_ovr_transformer_models_clean/**/training_args.bin
 LLM_gen/model_train/outputs/
 LLM_gen/*.whl
 
 # 一鍵重訓的輸出紀錄
-backend/classifcation/all_output.txt
+backend/classification/all_output.txt

@@ -233,7 +233,8 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
   抽取與合併的中間檔（`extracted_*.csv`、`deduped_prompt_attack.csv`、`merged_full_dataset.csv`）可以依上面的步驟重跑；
   `deduped_full_dataset.csv` 與 `data_set/train_full_dataset.csv` 內容完全相同（md5 一致）。這些檔案和從沒被任何腳本用到的
   `spml_prompt_injection.csv` 都已從目前版本移除，需要時可從 git 歷史取回：
-  `git checkout ba4c63a -- backend/classifcation/<檔名>`（取回後再依新目錄名搬移）
+  `git checkout ba4c63a -- backend/classifcation/<檔名>`（那時目錄名還是拼錯的 `classifcation`，取回後搬到 `backend/classification/`）
+- 目錄原名 `classifcation`（拼錯），2026-11-26 改成 `classification`。
 - 歷史檔名對照：`full_data_set_fillted.csv`（filtered 錯字）= 現 `train_full_dataset.csv`；`FILLTTER/` = 現 `data_pipeline/`
 - 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
 - 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
@@ -247,7 +248,7 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 |---|---|---|
 | **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib` | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
 | **BiLSTM**（字元級，packed） | `BILSTM/train_multiclass_bilstm.py` → `backend_ml_guardrail_bilstm_pytorch.pt` + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
-| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer_legacy.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
 
 ### 訓練與評估（2026-11-26 起）
 

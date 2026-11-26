@@ -8,7 +8,7 @@ FAQ 檢索評估：換了 rag_db.json 或調整 RAG_MIN_SCORE 後跑一次，看
 兩組資料：
 - tools/rag_eval_queries.csv：使用者換句話問 FAQ 裡的題目（應命中，且要命中對的那題）。
   換成自己的 FAQ 後，這份也要換成對應的問法。
-- classifcation/data_set/hard_eval.csv：guardrail 的 199 句評估集，裡面的句子 FAQ 都沒有標準答案，
+- classification/data_set/hard_eval.csv：guardrail 的 199 句評估集，裡面的句子 FAQ 都沒有標準答案，
   命中就算誤命中（同主題但不同題目的會列出來，自行判斷）。
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ sys.path.insert(0, str(BACKEND))
 from app.services.rag import retrieve_rag_hit  # noqa: E402
 
 QUERIES = BACKEND / "tools" / "rag_eval_queries.csv"
-HARD_EVAL = BACKEND / "classifcation" / "data_set" / "hard_eval.csv"
+HARD_EVAL = BACKEND / "classification" / "data_set" / "hard_eval.csv"
 
 
 def _same(a: str, b: str) -> bool:

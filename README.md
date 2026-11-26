@@ -63,7 +63,7 @@ CS_Agent/
 │   │   ├── config.py
 │   │   ├── routers/ws.py
 │   │   └── services/
-│   ├── classifcation/       # 分類模型相關（另見其 README）
+│   ├── classification/       # 分類模型相關（另見其 README）
 │   └── README.md
 ├── Front/                   # React + Vite 聊天前端
 │   └── README.md
@@ -181,5 +181,5 @@ curl http://localhost:8000/health   # {"status":"ok","llama":"connected"}
 
 ## 注意事項
 
-- `backend/classifcation/` 為**獨立分類資料與模型**目錄，請依該目錄內文件與流程管理。
+- `backend/classification/` 為**獨立分類資料與模型**目錄，請依該目錄內文件與流程管理。
 - 若需擴充協定或事件型別，請同步更新前後端的事件處理邏輯。

@@ -59,8 +59,8 @@ _model_dir_env = os.environ.get("GUARDRAIL_MODEL_DIR", None)
 if _model_dir_env:
     MODEL_DIR = Path(_model_dir_env)
 else:
-    # Use the path you gave: classifcation/transformer/backend_ml_ovr_transformer_models_clean
-    MODEL_DIR = Path(__file__).resolve().parents[2] / "classifcation" / "transformer" / "backend_ml_ovr_transformer_models_clean"
+    # Use the path you gave: classification/transformer/backend_ml_ovr_transformer_models_clean
+    MODEL_DIR = Path(__file__).resolve().parents[2] / "classification" / "transformer" / "backend_ml_ovr_transformer_models_clean"
 
 MODEL_DIR = _ensure_path(MODEL_DIR)
 # 相對於本檔案定位，避免受工作目錄（CWD）影響——不同目錄啟動會 silently 跳過語意階段

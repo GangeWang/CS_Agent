@@ -1,8 +1,8 @@
 import pandas as pd
 import re
 
-INPUT_PARQUET = r"E:\CS_Agent\backend\classifcation\train-00000-of-00001-036257a1398b1fca.parquet"
-OUTPUT_CSV = r"E:\CS_Agent\backend\classifcation\extracted_abusive.csv"
+INPUT_PARQUET = r"E:\CS_Agent\backend\classification\train-00000-of-00001-036257a1398b1fca.parquet"
+OUTPUT_CSV = r"E:\CS_Agent\backend\classification\extracted_abusive.csv"
 
 # 手動指定欄位（依你資料）
 LABEL_COL = "labels"
