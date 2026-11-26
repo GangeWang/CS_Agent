@@ -93,51 +93,55 @@ PROMPT_ATTACK_RULES = [
 ]
 
 ABUSIVE_RULES = [
-    r"白癡", r"智障", r"垃圾", r"幹你娘", r"廢物", r"低能", r"講三小"
+    r"白癡", r"智障", r"幹你娘", r"廢物", r"低能", r"講三小",
+    # 「垃圾」單字會誤擋「垃圾分類/垃圾郵件/垃圾桶」等正常客服詢問，排除常見複合詞
+    r"垃圾(?!分類|桶|袋|車|場|郵件|信|訊息|簡訊|電話|處理|回收|清運|費|食物)",
 ]
 
+# 強規則：單獨出現即判 SPAM。只放「正常客服對話幾乎不會出現」的片語；
+# 單一常用詞（立即、投資、賺錢、入會、禮品卡…）一律不放這裡，否則會誤擋正常提問
+# （例：「請立即幫我處理退款」「想了解投資型保單」「我要加入會員」）。
 SPAM_RULES_STRONG = [
-    # 原有強規則（聯絡/成人等）
+    # 色情 / 成人引流
     r"看片.*(找我|私訊|加我)",
-    r"(高清|無碼|外流).*(影片|資源)?",
-    r"(成人|AV片|絲襪|偷拍自拍|情色)",
-    r"(私訊|加我).*(line|wechat|tg|telegram|whatsapp)",
-    # 短連結或可疑短網址服務 (短連結常見於釣魚)
-    r"\b(bit\.ly|tinyurl\.com|goo\.gl|t\.co|ow\.ly|短網址|短連結)\b",
-    # 直接指令性邀請加群或私下聯絡
-    r"(加入我們|加入群組|掃描二維碼|掃碼|掃描QR|加群|入群|入會).*",
-    # 推銷/誘導/立即行動詞常見於詐騙
-    r"(點我|點此|立刻|立即|現在就|馬上領|點下方|點擊鏈接).*",
-    # 提供保證獲利 / 賺錢 / 日入
-    r"(保證獲利|穩賺|無風險|零風險|日入|月入|年化|躺賺|快速致富|賺大錢|本金翻倍|投資|賺錢).*",
-    # 購買服務 / 虛假投資 / 博弈代儲代充
-    r"(買粉|買讚|刷評價|博弈|賭博|代儲|代充|投注|下注|下注教學).*",
-    # 含有看似誘導的敏感金流用語（gift card 等）
-    r"(禮品卡|gift card|voucher|redeem code|giftcode).*",
-
+    r"(高清|無碼|外流).{0,6}(影片|資源|視頻)",
+    r"(AV片|偷拍自拍|情色影片|成人影片)",
+    r"(私訊|加我).{0,10}(line|wechat|tg|telegram|whatsapp)",
+    # 短網址服務（常見於釣魚）
+    r"(?<![\w.])(bit\.ly|tinyurl\.com|goo\.gl|t\.co|ow\.ly)/",
+    # 引流加群
+    r"(加入我們的?群|加入群組|掃描二維碼|掃碼加|加群|入群)",
+    # 明確的獲利保證話術
+    r"(保證獲利|穩賺不賠|穩賺|躺賺|快速致富|本金翻倍|日入\s*\d|月入\s*\d)",
+    # 灌水 / 代儲代充 / 博弈教學
+    r"(買粉|買讚|刷評價|代儲|代充|下注教學|博弈網站)",
 ]
 
+# 意圖規則：只有在「同時帶非白名單網址」時才判 SPAM（見 spam_rule_with_url_context）
 SPAM_INTENT_PATTERNS = [
     # 聯絡/私訊/加群/加line/加tg
     r"加我(好友|line|wechat|tg|telegram|whatsapp)?",
     r"私訊我",
     r"私聊我",
-    r"(加入|加入我們).*",
+    r"加入",
     r"(掃描|掃碼|掃描二維碼|掃描QR|掃描QR碼)",
     # 投資/賺錢相關
-    r"保證獲利|躺賺|快速致富|快速賺錢|賺錢方法|投資賺錢|投資顧問|高報酬|高回報",
-    r"日入|月入|年入|日入\W*\d+|月入\W*\d+",
-    # 金融/匯款/收款/付款/轉帳/提款
-    # 促使點擊鏈接/短連結/點擊操作
-    r"(點我|點此|點擊|點開|按下方|按我|クリック|click here|follow the link)\b",
+    r"保證獲利|躺賺|快速致富|快速賺錢|賺錢方法|投資賺錢|投資顧問|高報酬|高回報|零風險|無風險|年化",
+    r"投資|賺錢|日入|月入|年入",
+    # 促使點擊鏈接/立即行動
+    r"(點我|點此|點擊|點開|按下方|按我|立刻|立即|馬上領|現在就|click here|follow the link)",
     # 購買/下單/刷單/兼職/代做
-    r"(兼職|日薪|日結|接單|接案|刷單|代刷|代做).*",
+    r"(兼職|日薪|日結|接單|接案|刷單|代刷|代做)",
+    # 博弈
+    r"(博弈|賭博|投注|下注)",
+    # 禮品卡 / 兌換碼
+    r"(禮品卡|gift card|voucher|redeem code|giftcode)",
     # 加密貨幣/空投/投資工具誘導
-    r"(crypto|bitcoin|btc|ethereum|eth|airdrop|空投|挖礦|加密貨幣).*",
+    r"(crypto|bitcoin|btc|ethereum|eth|airdrop|空投|挖礦|加密貨幣)",
     # 詐騙常用英文片語
     r"\b(urgent|limited time|act now|verify your account|confirm your account|account suspended|claim your prize)\b",
     # 常見誘導詞（中文）
-    r"(保證|零風險|保本|無需投入|只要分享|下單即可|傳給朋友|分享即可獲得).*",
+    r"(保本|無需投入|只要分享|下單即可|傳給朋友|分享即可獲得)",
 ]
 
 URL_REGEX = re.compile(r"https?://[^\s]+", re.IGNORECASE)
@@ -175,12 +179,45 @@ def extract_urls(text: str) -> List[str]:
     return URL_REGEX.findall(text or "")
 
 
-def is_whitelisted_url(url: str, whitelist_domains: set[str]) -> bool:
-    try:
-        host = urlparse(url).netloc.lower()
-        return host in whitelist_domains
-    except Exception:
+def _normalize_domain(host: str) -> str:
+    """Normalize host: strip userinfo/port, leading www., trailing dot, lower-case."""
+    if not host:
+        return ""
+    host = host.rsplit("@", 1)[-1].split(":")[0].strip().rstrip(".").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _domain_whitelisted(domain: str, whitelist_domains: set[str]) -> bool:
+    """白名單比對：完全相同或為其子網域（support.samsung.com 屬於 samsung.com）。"""
+    if not domain:
         return False
+    return any(domain == w or domain.endswith("." + w) for w in whitelist_domains)
+
+
+def _url_domain(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        return _normalize_domain(parsed.netloc or parsed.path)
+    except Exception:
+        return ""
+
+
+def is_whitelisted_url(url: str, whitelist_domains: set[str]) -> bool:
+    return _domain_whitelisted(_url_domain(url), whitelist_domains)
+
+
+def _block_any_url_enabled() -> bool:
+    # GUARDRAIL_BLOCK_ANY_URL=true：恢復舊行為（任何非白名單網址一律判 SPAM）
+    return os.environ.get("GUARDRAIL_BLOCK_ANY_URL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def default_whitelist_domains() -> set[str]:
+    """內建白名單 + GUARDRAIL_WHITELIST_DOMAINS（逗號分隔）"""
+    extra = os.environ.get("GUARDRAIL_WHITELIST_DOMAINS", "")
+    domains = set(WHITELIST_DOMAINS) | {d for d in (x.strip() for x in extra.split(",")) if d}
+    return {_normalize_domain(d) for d in domains}
 
 
 def spam_rule_with_url_context(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, float, str]]:
@@ -207,52 +244,27 @@ def spam_rule_with_url_context(text: str, whitelist_domains: set[str]) -> Option
     return None
 
 
-# ---------- URL whitelist helpers & rule_first override ----------
-def _normalize_domain(host: str) -> str:
-    """
-    Normalize host: strip port, leading www., lower-case.
-    """
-    if not host:
-        return ""
-    host = host.split(":")[0]
-    if host.startswith("www."):
-        host = host[4:]
-    return host.lower()
-
 def _first_non_whitelisted_url(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, str]]:
-    """
-    Return (url, domain) for the first URL that is NOT in whitelist_domains.
-    If none found, return None.
-    """
-    urls = extract_urls(text or "")
-    if not urls:
-        return None
-    for u in urls:
-        try:
-            parsed = urlparse(u)
-            host = parsed.netloc or parsed.path  # handle some weird urls
-            domain = _normalize_domain(host)
-            if domain == "":
-                continue
-            # whitelist_domains expected to be lower-case strings without www.
-            if domain not in whitelist_domains:
-                return (u, domain)
-        except Exception:
-            # if parsing fails, treat as non-whitelisted suspicious URL
-            return (u, "")
+    """Return (url, domain) for the first URL that is NOT whitelisted, else None."""
+    for u in extract_urls(text or ""):
+        domain = _url_domain(u)
+        if not _domain_whitelisted(domain, whitelist_domains):
+            return (u, domain)
     return None
+
 
 def rule_first(text: str, whitelist_domains: set[str]) -> Optional[Tuple[str, float, str]]:
     """
     RULE stage:
-    0) If any non-whitelisted URL present -> SPAM (block).
+    0) (僅 GUARDRAIL_BLOCK_ANY_URL=true) 任何非白名單網址 -> SPAM
     1) PROMPT_ATTACK / ABUSIVE regex checks
-    2) spam_rule_with_url_context checks (existing)
+    2) spam_rule_with_url_context：強規則、多個非白名單網址、或網址 + 引流意圖
+    預設不再因「單一網址」就直接拒答（使用者貼訂單/商品連結是正常客服情境），
+    單一網址交給後續 ML / 語意階段判斷。
     """
     t = text or ""
 
-    # 0) BLOCK: any non-whitelisted URL => SPAM immediately
-    non_white = _first_non_whitelisted_url(t, whitelist_domains)
+    non_white = _first_non_whitelisted_url(t, whitelist_domains) if _block_any_url_enabled() else None
     if non_white:
         url, domain = non_white
         reason = f"rule:non_whitelist_url:{domain or 'unknown'}"
@@ -400,7 +412,9 @@ def _load_guardrail_resources():
         corpus_labels = []
         corpus_emb = None
 
-    whitelist = set(map(str.lower, cfg.get("whitelist_domains", sorted(WHITELIST_DOMAINS))))
+    whitelist = default_whitelist_domains() | {
+        _normalize_domain(d) for d in cfg.get("whitelist_domains", []) if isinstance(d, str)
+    }
 
     _GUARDRAIL_STATE["loaded"] = True
     _GUARDRAIL_STATE["error"] = None
@@ -453,11 +467,12 @@ def _semantic_predict(
 # =============================
 def classify_text(text: str) -> dict:
     """
-    Three-stage classify:
+    Three-stage classify（實際執行順序）:
     1) RULE
-    2) SEMANTIC (if resources available)
-    3) ML OVR (transformer)
-    Fallback-safe NORMAL only when whole service unavailable.
+    2) ML OVR (transformer)
+    3) SEMANTIC (if resources available; 僅在 ML 無類別過門檻時)
+    模型不可用時降級為純規則；未命中規則回 UNCERTAIN（或 fail-closed 時 PROMPT_ATTACK），
+    並以 available=False 標記，呼叫端不得視為 NORMAL。
     """
     try:
         rs = _load_guardrail_resources()
@@ -508,7 +523,7 @@ def classify_text(text: str) -> dict:
                 "topk": [],
                 "available": True,
             }
-        # Stage 2:  ML (OvR Transformer)
+        # Stage 3: SEMANTIC (optional)
         if embedder is not None and corpus_emb is not None and len(corpus_texts) > 0:
             sem_label, sem_conf, topk = _semantic_predict(
                 text=text,
@@ -533,7 +548,6 @@ def classify_text(text: str) -> dict:
                     "available": True,
                 }
 
-        # Stage 3: SEMANTIC (optional)
         # Final uncertain (service available, but no confident class)
         return {
             "stage": "UNCERTAIN",
@@ -554,7 +568,7 @@ def classify_text(text: str) -> dict:
         # Fail-safe：不再默認放行（fail-open）。降級為「純規則」篩查（規則不依賴模型）；
         # 仍未命中時，依 GUARDRAIL_FAIL_CLOSED 決定拒答（PROMPT_ATTACK）或標記 UNCERTAIN。
         try:
-            rr = rule_first(text, set(WHITELIST_DOMAINS))
+            rr = rule_first(text, default_whitelist_domains())
         except Exception as rule_err:
             logger.warning(f"Guardrail rule-only stage also failed: {rule_err}")
             rr = None
