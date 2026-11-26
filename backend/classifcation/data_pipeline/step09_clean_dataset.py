@@ -21,7 +21,7 @@
      - 其餘下採樣至 JIGSAW_ABUSIVE_CAP，避免 ABUSIVE 壓倒 NORMAL（原 10,268 vs 5,917）
   6) SPAM：被模板誤組的「合法通知」（若非本人請忽略 / 請備份資料…）→ 移除；> 200 字 → 移除
   7) 以正規化文字（去客套填充詞/標點）做近重複去重；同文不同標籤者全數移除
-  8) 合併 curated_seed_data.py 的人工優質樣本；困難評估集與訓練集不得重疊
+  8) 合併 curated_seed_data.py 的人工優質樣本（含 curated_seed_extra.py、curated_seed_long.py）；困難評估集與訓練集不得重疊
 
 用法（於 backend/classifcation/ 執行）：
     python data_pipeline/step09_clean_dataset.py
