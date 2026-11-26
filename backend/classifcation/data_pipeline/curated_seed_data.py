@@ -230,6 +230,14 @@ NORMAL = NORMAL + NORMAL_EXTRA + _long.NORMAL
 ABUSIVE = ABUSIVE + ABUSIVE_EXTRA + _long.ABUSIVE
 PROMPT_ATTACK = PROMPT_ATTACK + PROMPT_ATTACK_EXTRA + _long.PROMPT_ATTACK
 SPAM = SPAM + SPAM_EXTRA + _long.SPAM
+
+import curated_seed_targeted as _targeted  # noqa: E402  第四批：依 199 句 hard_eval 的錯誤情境補強
+
+NORMAL = NORMAL + _targeted.NORMAL
+ABUSIVE = ABUSIVE + _targeted.ABUSIVE
+PROMPT_ATTACK = PROMPT_ATTACK + _targeted.PROMPT_ATTACK
+SPAM = SPAM + _targeted.SPAM
+
 import curated_hard_eval as _hard_eval  # noqa: E402  困難評估集擴充（47 → 約 200 句）
 
 HARD_EVAL = HARD_EVAL + HARD_EVAL_EXTRA + _hard_eval.HARD_EVAL_V2

@@ -289,12 +289,12 @@ Windows PowerShell 5.1 下，python 的警告會顯示成紅字 `NativeCommandEr
 | SPAM 模板誤組出 31 筆合法通知（「若非本人請忽略」、「請備份資料」） | 標籤錯誤 |
 | 完全缺少「困難負樣本」：含立即/投資/加入/垃圾/禮品卡/網址、轉貼可疑簡訊詢問真偽等正常提問 | 與 guardrail 規則誤判同一類問題 |
 
-處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（10,755 筆：NORMAL 4,887 / ABUSIVE 3,649 / SPAM 1,464 / PROMPT_ATTACK 755）。
-每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` + `curated_seed_extra.py` 的 537 筆人工撰寫樣本（NORMAL 287 / ABUSIVE 104 / PROMPT_ATTACK 88 / SPAM 58；涵蓋電商、物流、電信、3C、金融保險、訂閱、旅遊餐飲、教育，重點是長句與含敏感字眼的困難負樣本、有情緒但無髒話的抱怨、中文客服情境的注入與越權）。第三批 `curated_seed_long.py` 再補 185 句 30 字以上的 NORMAL 與 37 句英文樣本（四類都有），共 759 筆人工樣本。
-`data_set/hard_eval.csv` 為困難評估集（不進訓練），重訓後請以它驗證誤判。原本 47 筆，2026-11-26 以 `data_pipeline/curated_hard_eval.py` 擴充到 199 筆（NORMAL 79 / ABUSIVE 50 / PROMPT_ATTACK 40 / SPAM 30），擴充前後的分數不能直接比較。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
+處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（11,128 筆：NORMAL 4,961 / ABUSIVE 3,779 / SPAM 1,519 / PROMPT_ATTACK 869）。
+每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` + `curated_seed_extra.py` 的 537 筆人工撰寫樣本（NORMAL 287 / ABUSIVE 104 / PROMPT_ATTACK 88 / SPAM 58；涵蓋電商、物流、電信、3C、金融保險、訂閱、旅遊餐飲、教育，重點是長句與含敏感字眼的困難負樣本、有情緒但無髒話的抱怨、中文客服情境的注入與越權）。第三批 `curated_seed_long.py` 再補 185 句 30 字以上的 NORMAL 與 37 句英文樣本（四類都有）。第四批 `curated_seed_targeted.py` 依 199 句 hard_eval 上線流程判錯的情境補 373 句：沒有髒話的情緒（反諷、反問、長篇抱怨）、中文冒充權限與套取他人資料、英文、離題閒聊，以及避免矯枉過正的 NORMAL 對照組。共 1,132 筆人工樣本。
+`data_set/hard_eval.csv` 為困難評估集（不進訓練），重訓後請以它驗證誤判。原本 47 筆，2026-11-26 以 `data_pipeline/curated_hard_eval.py` 擴充到 199 筆（NORMAL 79 / ABUSIVE 50 / PROMPT_ATTACK 40 / SPAM 30），擴充前後的分數不能直接比較。第四批訓練樣本是針對這份的弱點寫的，之後它比較像開發集、分數偏樂觀；要量真實表現需要另一份沒拿來補樣本的盲測集。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
 
 已知限制 / 後續：
-- NORMAL 長句仍偏少（≥30 字 312 筆，原本 116 筆；其餘 4,500+ 筆是 ML_data 短模板句），長度捷徑只是減輕、尚未消除；重訓後請特別看 hard_eval 裡長句 NORMAL 的表現
+- NORMAL 長句仍偏少（≥30 字 350 筆，原本 116 筆；其餘 4,500+ 筆是 ML_data 短模板句），長度捷徑只是減輕、尚未消除；重訓後請特別看 hard_eval 裡長句 NORMAL 的表現
 - 離題閒聊、笑話依負責人決定維持 SPAM（拒答）
 - PROMPT_ATTACK 只剩 745 筆，且翻譯來源有同一越獄模板的多個翻譯變體 → 建議再補中文客服情境的注入樣本
 - 標籤定義（2026-11-26 確認）：ABUSIVE = 使用者「有情緒」（不滿、焦急、失望、憤怒，有無髒話皆算），策略是先安撫再回答；ML_data 中「客服裝死不理人！準備接客訴」這類激動抱怨標 ABUSIVE 是正確的。人工種子已依此定義標註
