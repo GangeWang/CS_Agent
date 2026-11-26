@@ -1,2 +1,5 @@
 # 測試依賴（開發用）：pip install -r requirements-dev.txt
 pytest==9.2.0
+# classifcation/common.py 測試（tests/test_training_common.py）
+pandas==3.1.1
+scikit-learn==1.9.1

@@ -237,11 +237,30 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 
 ## 六種分類方式矩陣（3 演算法 × 2 架構）
 
-| | 4選1（單模型多分類，LabelEncoder/num_classes 動態） | OVR（4 個二元分類器，每 label 一個模型） |
+| | 4選1（單模型多分類） | OVR（4 個二元分類器，每 label 一個模型） |
 |---|---|---|
-| **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib`（吃 clean.csv） | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
-| **BiLSTM** | `BILSTM/train_multiclass_bilstm.py` → 單一 .pt + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
-| **Transformer** | `transformer/train_multiclass_transformer_legacy.py`（augmented 資料世代實驗） | `transformer/train_ovr_transformer.py`（吃 clean.csv）→ `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+| **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib` | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
+| **BiLSTM**（字元級，packed） | `BILSTM/train_multiclass_bilstm.py` → `backend_ml_guardrail_bilstm_pytorch.pt` + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
+| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer_legacy.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+
+### 訓練與評估（2026-11-26 起）
+
+六支腳本共用 `common.py`：同一份資料（`data_set/train_full_dataset_v2.csv`）、同一個切分（train 72% / val 8% / test 20%，seed 42，近重複已去除）、
+同一套評估，輸出路徑固定（不受執行目錄影響）。每支腳本都會：
+
+1. 在 **val** 上選門檻（OvR；F1 平台取中位數，平台過寬會印 `[WARN]`）
+2. 在 **test** 上報告；OvR 以上線決策規則（過門檻取最高、都沒過 → UNCERTAIN）組合成 4 類結果，與 4選1 可直接比較
+3. 在 **`data_set/hard_eval.csv`**（困難樣本，不進訓練）上報告並列出錯誤樣本
+4. 寫入 `reports/<method>.json`
+
+```powershell
+.\run_all_training.ps1                       # 六種方法 + 上線流程評估 + 比較表
+python compare_reports.py                    # 只看比較表
+python evaluate_guardrail_pipeline.py        # 評估上線完整流程（RULE → ML → SEMANTIC）
+$env:GUARDRAIL_BASE_MODEL="ckiplab/bert-base-chinese"; python transformer\train_ovr_transformer.py  # 換預訓練模型 A/B，輸出到另一個目錄，不覆蓋上線模型
+```
+
+重訓上線模型後，記得一併重建語意庫：`python build_semantic_models.py`（已改用 v2 資料）。
 
 > 命名對照歷史：原 `BILSTM.py` = multiclass（非 binary）；原 `transformer.py` = multiclass 實驗版；原 `binary_transformer.py` = 上線 OVR 訓練腳本（「binary」指每個二元分類器）。
 

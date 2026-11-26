@@ -37,7 +37,9 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(ROOT))
 import curated_seed_data as seeds  # noqa: E402
+from common import norm_key  # noqa: E402  與訓練腳本共用同一個近重複定義
 
 INPUT = ROOT / "data_set" / "train_full_dataset.csv"
 ML_DATA = ROOT / "data_set" / "ML_data.csv"  # 本地中文客服語境來源（其餘為翻譯來源）
@@ -67,15 +69,10 @@ INSULT = re.compile(
     re.I,
 )
 LEGIT_NOTICE = re.compile(r"若非本人請忽略|請備份資料|以避免資料遺失")
-FILLERS = re.compile(r"(不好意思|想請教一下|請告訴我|想了解|可以嗎|請問|我想問|嗎|呢)")
 
 
 def latin_ratio(s: str) -> float:
     return len(re.findall(r"[A-Za-z]", s)) / max(1, len(s))
-
-
-def norm_key(s: str) -> str:
-    return re.sub(r"[\W_]+", "", FILLERS.sub("", s)).lower()
 
 
 def removal_reason(text: str, label: str, from_ml_data: bool) -> str | None:
