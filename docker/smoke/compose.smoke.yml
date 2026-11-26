@@ -1,0 +1,19 @@
+# 冒煙測試：把推理服務換成假模型，其他（前端 nginx、後端、真的 guardrail 模型）照正式設定跑。
+# 用法（在倉庫根目錄）：
+#   docker compose -f docker-compose.yml -f docker/smoke/compose.smoke.yml up -d --build
+#   python docker/smoke/ws_smoke.py http://<這台機器的 IP>:8080
+#   docker compose -f docker-compose.yml -f docker/smoke/compose.smoke.yml down
+# 路徑以倉庫根目錄（第一個 -f 的目錄）為準。
+services:
+  inference:
+    build: !override
+      context: ./docker/smoke
+      dockerfile: Dockerfile.inference-fake
+      additional_contexts:
+        llmgen: ./LLM_gen
+    image: cs-agent/inference-fake:smoke
+    environment:
+      FAKE_MODE: ${FAKE_MODE:-nospecial}
+    deploy: !reset {}
+    volumes: !override
+      - ./docker/smoke/dummy.gguf:/models/CS_AgentV12.gguf:ro

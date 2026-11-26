@@ -1,0 +1,8 @@
+# 冒煙測試用推理服務：真的 LLM_gen/server_llama.py + 假的 llama_cpp（不需要 GPU、CUDA、GGUF）
+FROM python:3.12-slim
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]"
+WORKDIR /srv
+COPY llama_cpp.py ./
+COPY --from=llmgen server_llama.py ./
+EXPOSE 10000
+CMD ["uvicorn", "server_llama:app", "--host", "0.0.0.0", "--port", "10000"]
