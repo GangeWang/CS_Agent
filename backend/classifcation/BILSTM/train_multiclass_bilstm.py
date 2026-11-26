@@ -57,7 +57,6 @@ def main() -> None:
 
     train_loader = loader(s.X_train, s.y_train, shuffle=True)
     val_loader = loader(s.X_val, s.y_val)
-    test_loader = loader(s.X_test, s.y_test)
 
     model = B.BiLSTMClassifier(len(vocab), EMBED_DIM, HIDDEN_DIM, len(le.classes_), NUM_LAYERS, DROPOUT,
                                vocab[B.PAD]).to(device)

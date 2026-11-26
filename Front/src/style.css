@@ -584,13 +584,6 @@ body::after {
     font-weight: 600;
 }
 
-.header .title-card .sub {
-    margin-top: 6px;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-}
-
 .guardrail-status {
     display: inline-flex;
     align-items: center;

@@ -1,7 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
 import json
-import numpy as np
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
@@ -39,10 +38,6 @@ def load_all():
         models[lb] = model
 
     return models, tokenizers, thresholds, max_len, device
-
-
-def sigmoid(x: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-x))
 
 
 def predict_one_label(model, tokenizer, text: str, max_len: int, device) -> float:

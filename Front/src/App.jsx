@@ -327,15 +327,6 @@ export default function App() {
         }
     }
 
-    function extractDeltaText(payload) {
-        if (!payload || typeof payload !== 'object') return ''
-        const candidates = [payload.text, payload.response, payload.response_text, payload.output, payload.content]
-        for (const v of candidates) {
-            if (typeof v === 'string' && v.length > 0) return v
-        }
-        return ''
-    }
-
     function updateGuardrailUi(label) {
         setGuardrailUi(prev => getNextGuardrailUi(prev, label))
     }
@@ -379,20 +370,7 @@ export default function App() {
             return
         }
 
-        const text = extractDeltaText(payload)
-        if (text) {
-            bufferRef.current += text
-            ensureFlushTimer()
-            if (payload.done === true) {
-                flushBufferToMessage()
-                pendingAssistantId.current = null
-                setIsLoading(false)
-                clearFlushTimer()
-            }
-            return
-        }
-
-        if (payload.type === 'done' || payload.done === true) {
+        if (payload.type === 'done') {
             flushBufferToMessage()
             pendingAssistantId.current = null
             setIsLoading(false)
@@ -413,6 +391,8 @@ export default function App() {
             clearFlushTimer()
             return
         }
+
+        if (payload.type === 'history_cleared') return
 
         console.warn('[ws] unknown payload', payload)
     }

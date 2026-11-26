@@ -22,10 +22,6 @@ def register_tool(name: str, description: str, schema: Dict[str, Any], fn: ToolF
     _TOOL_REGISTRY[name] = ToolSpec(name=name, description=description, schema=schema, fn=fn)
 
 
-def list_tools() -> Dict[str, ToolSpec]:
-    return dict(_TOOL_REGISTRY)
-
-
 def get_tool(name: str) -> ToolSpec | None:
     return _TOOL_REGISTRY.get(name)
 
