@@ -254,13 +254,15 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 4. 寫入 `reports/<method>.json`
 
 ```powershell
-.\run_all_training.ps1                       # 六種方法 + 上線流程評估 + 比較表
+.\run_all_training.ps1                       # 六種方法 + 重建語意庫 + 上線流程評估 + 比較表（-SkipTest：評估只跑 hard_eval）
 python compare_reports.py                    # 只看比較表
 python evaluate_guardrail_pipeline.py        # 評估上線完整流程（RULE → ML → SEMANTIC）
 $env:GUARDRAIL_BASE_MODEL="ckiplab/bert-base-chinese"; python transformer\train_ovr_transformer.py  # 換預訓練模型 A/B，輸出到另一個目錄，不覆蓋上線模型
 ```
 
-重訓上線模型後，記得一併重建語意庫：`python build_semantic_models.py`（已改用 v2 資料）。
+`run_all_training.ps1` 會在端到端評估之前重建語意庫（`build_semantic_models.py`，已改用 v2 資料）。單獨重訓上線模型時，記得也要重建。
+
+Windows PowerShell 5.1 下，python 的警告會顯示成紅字 `NativeCommandError`，不代表失敗；`run_all_training.ps1` 會以結束代碼判斷，最後列出每一步成功或失敗。
 
 > 命名對照歷史：原 `BILSTM.py` = multiclass（非 binary）；原 `transformer.py` = multiclass 實驗版；原 `binary_transformer.py` = 上線 OVR 訓練腳本（「binary」指每個二元分類器）。
 

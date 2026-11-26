@@ -11,10 +11,14 @@
 用法（於任意目錄執行，需 torch / transformers / sentence-transformers 與 LFS 模型檔）：
     python backend/classifcation/evaluate_guardrail_pipeline.py [--skip-test]
 報告存 reports/pipeline.json（含各 stage 命中比例與錯誤樣本）。
+
+上線 guardrail 預設用 CPU；本腳本在沒有設定 GUARDRAIL_DEVICE 時改用 cuda（沒有 GPU 會自動退回 CPU），
+否則 test 2,000 多句 × 4 個模型在 CPU 上要跑很久。每 200 句印一次進度。
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
 from pathlib import Path
@@ -26,11 +30,20 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))  # backend/，讓 app.services.guardrail 可 import
 import common as C  # noqa: E402
 
+# 必須在 import guardrail 之前設定（guardrail 在 import 時讀取）
+os.environ.setdefault("GUARDRAIL_DEVICE", "cuda")
+
 
 def run(texts, y_true, title):
-    from app.services.guardrail import classify_text
+    from app.services.guardrail import DEVICE, classify_text
 
-    outs = [classify_text(str(t)) for t in texts]
+    n = len(texts)
+    print(f"[{title}] {n} 句，guardrail device = {DEVICE}", flush=True)
+    outs = []
+    for i, t in enumerate(texts, 1):
+        outs.append(classify_text(str(t)))
+        if i % 200 == 0 or i == n:
+            print(f"  {i}/{n}", flush=True)
     if any(not o.get("available", True) for o in outs):
         print("[WARN] guardrail 模型不可用（降級為規則），結果不代表模型表現；請確認 LFS 模型檔已下載")
     y_pred = np.array([o["label"] for o in outs], dtype=object)
