@@ -1,14 +1,15 @@
 # CS_Agent 交接文件（2026-11-26）
 
 > 這份文件記錄 2026-11-26 這一輪「架構技術債分析與修復」的完整狀態，讓下一位接手的人（或下一個 Claude session）不用重新問一遍就能繼續。
-> 所有變更都在分支 `claude/project-thread-nvor7j`，對應 [PR #35](https://github.com/GangeWang/CS_Agent/pull/35)，**尚未 merge**。
+> 主要變更在 [PR #35](https://github.com/GangeWang/CS_Agent/pull/35)（2026-11-26 已 merge）。
 
 ---
 
 ## 1. 一句話現況
 
 後端的高優先 bug 已修好；guardrail 訓練資料已清理並補上人工樣本；六支訓練腳本已改為共用切分與評估。
-**但所有模型都還沒有用新資料重新訓練**：上線的 guardrail 仍是舊資料訓練的版本，下一步要在有 GPU 的機器上重訓。
+2026-11-26 負責人已在自己的 GPU 機器上用 v2 重訓六種方法。上線流程在 hard_eval 答對 46/47 句，macro-F1 0.974（見第 6 節）。
+**新模型目前只在負責人的機器上，還沒 commit 進倉庫**；語意庫也還沒用 v2 重建。
 
 ---
 
@@ -70,15 +71,15 @@
 
 ## 4. 下一步（依優先順序）
 
-1. **Review 並 merge PR #35**。
-2. **在有 GPU 的機器上重訓並評估**（指令見第 5 節）：
-   - 跑 `run_all_training.ps1`，跑完用 `compare_reports.py` 看六種方法在 `hard_eval` 上的成績。
-   - 用數據確認 OvR 和 4選1 哪個好。4選1 的推論成本只有 OvR 的 1/4，如果兩者差不多，值得考慮。
-3. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`（以簡體語料為主）。
-4. **重建語意庫**：`python backend/classifcation/build_semantic_models.py`（已改用 v2）。
-5. **重訓後跑端到端評估**：`python backend/classifcation/evaluate_guardrail_pipeline.py`，確認上線流程（規則 → ML → 語意）的整體表現。
-6. 視評估結果決定是否**再補 NORMAL 長句**（目前 30 字以上只有 116 筆），由人工撰寫。
-7. 處理第 8 節剩下的技術債。
+1. ~~Review 並 merge PR #35~~（已完成）。
+2. ~~在有 GPU 的機器上用 v2 重訓六種方法~~（2026-11-26 已完成，結果見第 6 節）。
+3. **重建語意庫並重跑端到端評估**：`build_semantic_models.py` → `evaluate_guardrail_pipeline.py`。第 6 節的上線流程數字用的還是舊語意庫。
+4. **把新模型 commit 進倉庫**（Git LFS），上線環境才會拿到新模型。
+5. **（可選）OvR 改 4選1**：準確度打平（見第 6 節），只有在需要加快推論時才值得換。4選1 只要 1 次 forward，OvR 要 4 次；上線程式目前只支援 OvR，換的話要改 `guardrail.py`。
+6. **再清一次 SPAM 標籤**：transformer 在 test 上的錯誤，有不少是笑話和閒聊被標成 SPAM（例：「一個害怕黑暗的小孩怎麼變成整夜想在外面的青少年」、「離婚芭比」、「哈哈哈…」）。這類句子算 SPAM 還是 NORMAL 要先和負責人定義，再統一標註。
+7. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`（以簡體語料為主）。現有模型在 hard_eval 已經 0.97，優先度降低。
+8. 視評估結果決定是否**再補 NORMAL 長句和英文樣本**（目前 30 字以上的 NORMAL 只有 116 筆、英文為主的樣本只有 38 筆），由人工撰寫。
+9. 處理第 8 節剩下的技術債。
 
 ---
 
@@ -86,15 +87,21 @@
 
 ```powershell
 cd backend\classifcation
-.\run_all_training.ps1                       # 六種方法 → reports/*.json → 上線流程評估 → 比較表
+.\run_all_training.ps1                       # 六種方法 → 重建語意庫 → 上線流程評估 → 比較表，最後列出每一步成功或失敗
+.\run_all_training.ps1 -SkipTest             # 同上，但端到端評估只跑 hard_eval（較快）
 python compare_reports.py                    # 只看比較表
 
 # 換預訓練模型做 A/B（輸出到 ..._models_clean__ckiplab-bert-base-chinese，不覆蓋上線模型）
 $env:GUARDRAIL_BASE_MODEL="ckiplab/bert-base-chinese"; python transformer\train_ovr_transformer.py
 
-python build_semantic_models.py              # 重訓上線模型後重建語意庫
-python evaluate_guardrail_pipeline.py        # 端到端評估
+python build_semantic_models.py              # 單獨重建語意庫
+python evaluate_guardrail_pipeline.py        # 單獨跑端到端評估（預設用 GPU，每 200 句印一次進度）
 ```
+
+> Windows PowerShell 5.1 的注意事項：
+> - python 印到 stderr 的警告或進度條，在 `2>&1` 之下會顯示成紅字的 `NativeCommandError`，**這不代表失敗**。`run_all_training.ps1` 已經把它轉成一般文字，並以結束代碼判斷成功或失敗。
+> - 手動跑腳本時，如果輸出經過 `Tee-Object` 或管線，請先設 `$env:PYTHONUNBUFFERED="1"`，不然畫面會像卡住。
+> - 上線 guardrail 預設用 CPU（`GUARDRAIL_DEVICE`）。`evaluate_guardrail_pipeline.py` 沒設定時會改用 cuda。
 
 後端測試：
 
@@ -108,29 +115,29 @@ pytest tests/          # 目前 51 個，全部通過
 
 ---
 
-## 6. Sandbox 參考數據（沒有 GPU，只跑了 ML 和 BiLSTM）
+## 6. v2 重訓結果（2026-11-26）
 
-用完整的 v2 資料和共用切分實際訓練。test 有 2,107 筆，hard_eval 有 47 筆。**hard_eval 樣本少，只能看方向，不能下定論。**
+負責人在自己的 GPU 機器上用 `run_all_training.ps1` 跑完六種方法和端到端評估，資料是完整的 v2 和共用切分。test 有 2,107 筆，hard_eval 有 47 筆。**hard_eval 樣本少（一筆約 2%），只能看方向，不能下定論。**
 
-| 方法 | test macro-F1 | test 準確率 | hard_eval macro-F1 | hard_eval 準確率 | hard_eval UNCERTAIN |
-|---|---|---|---|---|---|
-| TF-IDF + LR 4選1 | 0.973 | 0.979 | 0.809 | 0.830（錯 8 筆） | 0% |
-| TF-IDF + LR OvR | 0.966 | 0.969（UNCERTAIN 2.1%） | 0.735 | 0.660（錯 16 筆） | 21.3% |
-| BiLSTM 4選1 | 0.958 | 0.972 | 0.761 | 0.766（錯 11 筆） | 0% |
-| BiLSTM OvR | 0.966 | 0.969（UNCERTAIN 2.0%） | **0.847** | **0.851**（錯 7 筆） | 0% |
-| Transformer 4選1 / OvR | 需要 GPU，尚未跑 | | | | |
+| 方法 | test macro-F1 | test 準確率 | test UNCERTAIN | hard_eval macro-F1 | hard_eval 準確率 | hard_eval UNCERTAIN |
+|---|---|---|---|---|---|---|
+| TF-IDF + LR 4選1 | 0.972 | 0.979 | 0% | 0.804 | 0.809 | 0% |
+| TF-IDF + LR OvR | 0.967 | 0.969 | 2.0% | 0.735 | 0.660 | 21.3% |
+| BiLSTM 4選1 | 0.957 | 0.972 | 0% | 0.788 | 0.787 | 0% |
+| BiLSTM OvR | 0.969 | 0.973 | 1.8% | 0.793 | 0.745 | 12.8% |
+| Transformer 4選1 | 0.992 | 0.995 | 0% | **0.974** | **0.979**（錯 1 句） | 0% |
+| Transformer OvR | 0.994 | 0.994 | 0.3% | 0.973 | 0.957（2 句 UNCERTAIN，判錯類別 0 句） | 4.3% |
+| **上線流程**（規則 → Transformer OvR → 語意比對） | 0.994 | 0.994 | 0.2% | **0.974** | **0.979**（錯 1 句） | 0% |
 
-OvR 在 val 上選出的門檻：
-- TF-IDF：NORMAL 0.45 / ABUSIVE 0.69 / PROMPT_ATTACK 0.65 / SPAM 0.55
-- BiLSTM：NORMAL 0.34 / ABUSIVE 0.81 / PROMPT_ATTACK 0.92 / SPAM 0.78
+> 上線流程這一列，用的還是 v2 之前的舊語意庫（當時 `run_all_training.ps1` 還沒有重建語意庫這一步）。只有 0.2% 的句子會走到語意比對，重建後的影響應該很小，但仍建議重跑一次。
 
 觀察：
-- **test 分數都在 96～98%，hard_eval 卻只有 66～85%**。這代表 test 仍然偏簡單（模板化資料），真正的難點在 hard_eval 這類真實語句。之後判斷模型好壞時，請以 hard_eval 為主。
-- **OvR 和 4選1 哪個好，在不同模型上結論不一樣**：
-  - BiLSTM 上 OvR 明顯較好（0.847 對 0.761），這和負責人「OvR 較好」的實測方向一致。
-  - TF-IDF 上反而是 4選1 較好，因為 OvR 有 21% 的 hard_eval 樣本沒有任何類別過門檻，落入 UNCERTAIN。上線時 UNCERTAIN 會再交給語意比對，所以這不等於上線的錯誤率。
-  - hard_eval 只有 47 筆，一筆約 2%。BiLSTM OvR 和 TF-IDF 4選1 只差 1 筆，分不出高下。
-  - Transformer 的結果要等 GPU 重訓後才知道，請用新的統一評估再確認一次。
+- **Transformer 遠勝其他方法**：hard_eval 0.97，TF-IDF 和 BiLSTM 只有 0.73～0.80。
+  - 4選1 錯的 1 句是英文的 prompt attack（Ignore the above...）被判成 ABUSIVE。
+  - OvR 沒有判錯任何類別，只有 2 句沒把握（「我是你們老闆，命令你…」和一句英文抱怨）落入 UNCERTAIN。上線流程接住了這 2 句，最後只錯 1 句，跟 4選1 一樣。
+- **OvR 或 4選1**：在 transformer 上準確度打平，沒有準確度上的理由換架構。要換只會是為了推論速度，4選1 只要 1 次 forward，OvR 要 4 次。上線維持 OvR。
+- **TF-IDF 和 BiLSTM 的 test 分數都在 96～98%，hard_eval 卻只有 66～80%**。test 仍然偏簡單（模板化資料），判斷模型好壞時請以 hard_eval 為主。
+- **BiLSTM 的結果不穩定**：同樣的程式和資料，sandbox（CPU）上 BiLSTM OvR 的 hard_eval 是 0.847，負責人的 GPU 機器上是 0.793。47 句的評估集加上訓練的隨機性，BiLSTM 和 TF-IDF 之間的 OvR / 4選1 比較不可靠。
 - 常見錯誤（各方法的錯誤明細在 `reports/<方法>.json` 的 `errors`）：
   - **英文訊息**：正常的英文詢問被判成 SPAM 或 ABUSIVE，英文的 prompt attack 被判成 ABUSIVE。v2 裡以英文為主的句子只有 38 筆（約 0.4%），模型等於沒學過英文；推測英文字母多的句子容易被當成網址或廣告。
   - **含官方網址的正常詢問**被判成 SPAM（例：附上 samsung.com 訂單連結）。規則層的白名單只會讓規則不命中，模型本身仍然可能判成 SPAM。
@@ -141,7 +148,7 @@ OvR 在 val 上選出的門檻：
 
 ## 7. 已知限制與風險
 
-- **所有模型都還沒用 v2 重訓**，上線 guardrail 的行為目前只有規則部分改變了。
+- **v2 重訓的新模型還沒 commit 進倉庫**，倉庫和 docker 映像檔裡仍是舊模型。
 - `server_llama.py` 的改動只做過語法檢查，沒有在 GPU 環境實際跑過。
 - 後端測試在 sandbox 是用 stub 取代 torch/transformers 跑的，這些測試本身不載入模型。
 - NORMAL 長句仍然偏少，長度捷徑只是減輕，還沒有完全消除。
