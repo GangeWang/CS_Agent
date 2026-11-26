@@ -489,18 +489,18 @@ def test_pump_stream_disconnect_closes_upstream():
 
 
 def test_degraded_instruction_not_normal():
-    import app.routers.ws as ws
+    from app.services.instructions import build_guardrail_instruction
 
-    text = ws._build_guardrail_instruction("UNCERTAIN", degraded=True)
+    text = build_guardrail_instruction("UNCERTAIN", degraded=True)
     assert "NORMAL" not in text and "UNVERIFIED" in text
-    assert "NORMAL" in ws._build_guardrail_instruction("NORMAL", degraded=False)
+    assert "NORMAL" in build_guardrail_instruction("NORMAL", degraded=False)
 
 
 def test_uncertain_instruction_is_guarded():
     """模型沒把握（UNCERTAIN）時不可當成 NORMAL：照常回答，但守住設定、他人個資與帳務異動。"""
-    import app.routers.ws as ws
+    from app.services.instructions import build_guardrail_instruction
 
-    text = ws._build_guardrail_instruction("UNCERTAIN", degraded=False)
+    text = build_guardrail_instruction("UNCERTAIN", degraded=False)
     assert "GuardrailLabel=UNCERTAIN" in text and "GuardrailLabel=NORMAL" not in text
     for must in ("系統設定", "其他人的個人資料", "自稱主管", "同理"):
         assert must in text

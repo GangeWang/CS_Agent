@@ -162,3 +162,57 @@ def test_health_reports_disconnected(make_client):
     with client:
         body = client.get("/health").json()
     assert body["status"] == "degraded" and body["llama"] == "disconnected"
+
+
+def test_non_object_json_is_rejected(make_client):
+    client, _ = make_client(lambda r: httpx.Response(500))
+    with client, client.websocket_connect("/ws/chat") as ws:
+        ws.send_text("[1, 2]")
+        assert json.loads(ws.receive_text()) == {"type": "error", "error": "JSON 格式不正確"}
+        ws.send_text(json.dumps({"type": "ping"}))
+        assert json.loads(ws.receive_text()) == {"type": "pong"}
+
+
+def test_rate_limit(make_client, monkeypatch):
+    import app.routers.ws as ws_mod
+
+    monkeypatch.setattr(ws_mod.settings, "ws_rate_limit_messages", 1)
+    client, _ = make_client(lambda r: httpx.Response(200, content=_sse({"text": FINAL + "好"}, {"done": True})))
+    with client, client.websocket_connect("/ws/chat") as ws:
+        ws.send_text(json.dumps({"messages": [{"role": "user", "content": "一"}]}))
+        _recv_until(ws, {"done", "error"})
+        ws.send_text(json.dumps({"messages": [{"role": "user", "content": "二"}]}))
+        assert json.loads(ws.receive_text()) == {"type": "error", "error": "傳送過於頻繁，請稍候再試。"}
+
+
+def test_clear_history_forgets_previous_turns(make_client):
+    client, seen = make_client(lambda r: httpx.Response(200, content=_sse({"text": FINAL + "好"}, {"done": True})))
+    with client, client.websocket_connect("/ws/chat") as ws:
+        ws.send_text(json.dumps({"messages": [{"role": "user", "content": "第一句"}]}))
+        _recv_until(ws, {"done", "error"})
+        ws.send_text(json.dumps({"type": "clear_history"}))
+        assert json.loads(ws.receive_text()) == {"type": "history_cleared"}
+        ws.send_text(json.dumps({"messages": [{"role": "user", "content": "第二句"}]}))
+        _recv_until(ws, {"done", "error"})
+    assert [m["content"] for m in seen["requests"][-1]["messages"]] == ["第二句"]
+
+
+def test_idle_warning_then_timeout(make_client, monkeypatch):
+    import app.routers.ws as ws_mod
+
+    client, _ = make_client(lambda r: httpx.Response(200, content=_sse({"text": FINAL + "摘要"}, {"done": True})))
+    monkeypatch.setattr(ws_mod, "IDLE_TIMEOUT_SECONDS", 1000)
+    monkeypatch.setattr(ws_mod, "IDLE_WARNING_SECONDS_BEFORE_END", 1000)
+    with client, client.websocket_connect("/ws/chat") as ws:
+        ws.send_text(json.dumps({"type": "ping"}))
+        warning = json.loads(ws.receive_text())
+        assert warning["type"] == "idle_warning" and warning["remaining_seconds"] > 0
+        assert json.loads(ws.receive_text()) == {"type": "pong"}
+        # 警告只送一次
+        ws.send_text(json.dumps({"type": "ping"}))
+        assert json.loads(ws.receive_text()) == {"type": "pong"}
+
+        monkeypatch.setattr(ws_mod, "IDLE_TIMEOUT_SECONDS", 0)
+        ws.send_text(json.dumps({"type": "ping"}))
+        msgs = _recv_until(ws, {"conversation_ended"})
+    assert msgs[-1] == {"type": "conversation_ended", "reason": "idle_timeout"}

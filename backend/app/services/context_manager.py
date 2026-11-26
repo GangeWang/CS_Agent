@@ -57,7 +57,8 @@ def _threshold_tokens() -> int:
     return max(128, int(_context_budget_tokens() * ratio))
 
 
-def _is_summary_message(message: Dict[str, str]) -> bool:
+def is_summary_message(message: Dict[str, str]) -> bool:
+    """壓縮後的較早對話摘要（以 system 訊息存放在歷史最前面）。"""
     return message.get("role") == SUMMARY_ROLE and message.get("content", "").startswith(SUMMARY_PREFIX)
 
 
@@ -65,7 +66,7 @@ def _split_summary_and_dialogue(history: List[Dict[str, str]]) -> Tuple[List[Dic
     summaries: List[Dict[str, str]] = []
     dialogue: List[Dict[str, str]] = []
     for item in history:
-        if _is_summary_message(item):
+        if is_summary_message(item):
             summaries.append(item)
         else:
             dialogue.append(item)
@@ -74,7 +75,7 @@ def _split_summary_and_dialogue(history: List[Dict[str, str]]) -> Tuple[List[Dic
 
 def _format_messages(messages: List[Dict[str, str]]) -> str:
     role_names = {
-        "system": "系統摘要",
+        "system": "較早對話摘要",
         "user": "使用者",
         "assistant": "客服助手",
     }
@@ -209,3 +210,24 @@ async def manage_context(
         "after_tokens": after_tokens,
         "dropped_messages": max(0, len(history) - len(managed)),
     }
+
+
+async def summarize_conversation(history: List[Dict[str, str]], model: str | None) -> str:
+    """對話結束（手動或閒置逾時）時給使用者看的摘要；失敗時回固定文案。"""
+    dialogue = _format_messages(history)
+    if not dialogue:
+        return "本次對話沒有可摘要的內容。"
+
+    prompt = (
+        "請用繁體中文整理以下客服對話摘要，格式需包含：\n"
+        "1. 問題重點\n"
+        "2. 已提供的協助\n"
+        "3. 後續建議（若無則寫無）\n\n"
+        f"對話內容：\n{dialogue}"
+    )
+    summary, error = await generate_text(prompt, model)
+    if summary:
+        return summary
+    if error:
+        logger.warning("Conversation summary failed: %s", error)
+    return "摘要產生失敗，請稍後再試。"

@@ -117,3 +117,29 @@ def test_refresh_if_stale_is_throttled(cm, monkeypatch):
     asyncio.run(info.refresh_if_stale())
     assert calls == ["/health"]
     assert cm.effective_context_max_tokens() == 16384
+
+
+def test_session_store_trims_but_keeps_latest_summary(monkeypatch):
+    from app.services import session_store
+    from app.services.context_manager import SUMMARY_PREFIX
+
+    monkeypatch.setattr(session_store.settings, "history_max_length", 4)
+    session_store.set_history("s", [
+        {"role": "system", "content": SUMMARY_PREFIX + " 舊摘要"},
+        {"role": "system", "content": SUMMARY_PREFIX + " 新摘要"},
+    ])
+    for i in range(3):
+        session_store.append_turn("s", f"問{i}", f"答{i}")
+    history = session_store.get_history("s")
+    session_store.drop("s")
+    assert [m["content"] for m in history] == [SUMMARY_PREFIX + " 新摘要", "問1", "答1", "問2", "答2"]
+
+
+def test_session_store_returns_copies():
+    from app.services import session_store
+
+    session_store.create("c")
+    session_store.get_history("c").append({"role": "user", "content": "x"})
+    assert session_store.get_history("c") == []
+    session_store.drop("c")
+    assert session_store.get_history("c") == []
