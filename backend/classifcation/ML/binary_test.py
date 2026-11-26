@@ -5,7 +5,7 @@ import numpy as np
 import joblib
 
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
-MODEL_DIR = Path("../../semantic_models")
+MODEL_DIR = Path(__file__).resolve().parent / "backend_ml_ovr_models"  # 原本指向 semantic_models（錯誤）
 CONFIG_PATH = MODEL_DIR / "ovr_config.json"
 
 

@@ -45,6 +45,9 @@ docker compose down -v                   # 連快取一起清
 | `LLAMA_N_CTX`（inference service） | `8192` | 上下文長度 |
 | `LLAMA_N_GPU_LAYERS` | `-1` | 全部層進 GPU |
 | `GUARDRAIL_DEVICE`（backend service） | `cpu` | 容器內 guardrail 裝置 |
+| `GUARDRAIL_FAIL_CLOSED` | 未設（false） | 模型不可用且規則未命中時直接拒答；未設時改用保守指令回覆，不再視為 NORMAL |
+| `GUARDRAIL_BLOCK_ANY_URL` | 未設（false） | true 時任何非白名單網址一律判 SPAM（舊行為）；預設只擋多網址或網址 + 引流意圖 |
+| `GUARDRAIL_WHITELIST_DOMAINS` | 空 | 額外網址白名單（逗號分隔，含子網域），與內建 `samsung.com` 合併 |
 
 ## 設計原則
 

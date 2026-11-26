@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 
 # 依你的實際路徑調整
-MODEL_DIR = Path("./backend_ml_ovr_transformer_models_clean")  # 注意你原本「semantic_models」是全形底線，建議改半形 _
+MODEL_DIR = Path(__file__).resolve().parent / "backend_ml_ovr_transformer_models_clean"  # 不受 CWD 影響
 CONFIG_PATH = MODEL_DIR / "ovr_config.json"
 
 

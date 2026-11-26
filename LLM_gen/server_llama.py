@@ -8,6 +8,7 @@ import logging
 import os
 import inspect
 import re
+import threading
 
 try:
     from llama_cpp import Llama
@@ -443,17 +444,25 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
 
     async def event_stream():
         queue: asyncio.Queue = asyncio.Queue()
+        # client 斷線（後端逾時取消）或串流結束時 set：生成執行緒在下一個 token 停止，
+        # 不再為已離開的請求繼續佔用模型（單一 worker 會擋住後續所有請求）
+        stop_event = threading.Event()
 
         def blocking_stream():
 
             try:
-                for chunk in model_stream_generator(
+                gen = model_stream_generator(
                         llm,
                         prompt=prompt,
                         max_tokens=max_tokens,
                         system_prompt=system_prompt,
                         messages=msgs,
-                ):
+                )
+                for chunk in gen:
+                    if stop_event.is_set():
+                        logger.info("stream cancelled by client; stopping generation")
+                        gen.close()
+                        return
                     txt = _extract_text_from_chunk(chunk, system_prompt=system_prompt)
                     if txt:
                         clean = _sanitize_model_output(txt)
@@ -496,6 +505,7 @@ async def stream(request: Request, auth=Depends(verify_api_key)):
                 if isinstance(payload, dict) and (payload.get("done") or payload.get("error")):
                     break
         finally:
+            stop_event.set()
             inference_semaphore.release()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

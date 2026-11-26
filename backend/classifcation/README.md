@@ -237,11 +237,30 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 
 ## 六種分類方式矩陣（3 演算法 × 2 架構）
 
-| | 4選1（單模型多分類，LabelEncoder/num_classes 動態） | OVR（4 個二元分類器，每 label 一個模型） |
+| | 4選1（單模型多分類） | OVR（4 個二元分類器，每 label 一個模型） |
 |---|---|---|
-| **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib`（吃 clean.csv） | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
-| **BiLSTM** | `BILSTM/train_multiclass_bilstm.py` → 單一 .pt + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
-| **Transformer** | `transformer/train_multiclass_transformer_legacy.py`（augmented 資料世代實驗） | `transformer/train_ovr_transformer.py`（吃 clean.csv）→ `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+| **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib` | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
+| **BiLSTM**（字元級，packed） | `BILSTM/train_multiclass_bilstm.py` → `backend_ml_guardrail_bilstm_pytorch.pt` + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
+| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer_legacy.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+
+### 訓練與評估（2026-11-26 起）
+
+六支腳本共用 `common.py`：同一份資料（`data_set/train_full_dataset_v2.csv`）、同一個切分（train 72% / val 8% / test 20%，seed 42，近重複已去除）、
+同一套評估，輸出路徑固定（不受執行目錄影響）。每支腳本都會：
+
+1. 在 **val** 上選門檻（OvR；F1 平台取中位數，平台過寬會印 `[WARN]`）
+2. 在 **test** 上報告；OvR 以上線決策規則（過門檻取最高、都沒過 → UNCERTAIN）組合成 4 類結果，與 4選1 可直接比較
+3. 在 **`data_set/hard_eval.csv`**（困難樣本，不進訓練）上報告並列出錯誤樣本
+4. 寫入 `reports/<method>.json`
+
+```powershell
+.\run_all_training.ps1                       # 六種方法 + 上線流程評估 + 比較表
+python compare_reports.py                    # 只看比較表
+python evaluate_guardrail_pipeline.py        # 評估上線完整流程（RULE → ML → SEMANTIC）
+$env:GUARDRAIL_BASE_MODEL="ckiplab/bert-base-chinese"; python transformer\train_ovr_transformer.py  # 換預訓練模型 A/B，輸出到另一個目錄，不覆蓋上線模型
+```
+
+重訓上線模型後，記得一併重建語意庫：`python build_semantic_models.py`（已改用 v2 資料）。
 
 > 命名對照歷史：原 `BILSTM.py` = multiclass（非 binary）；原 `transformer.py` = multiclass 實驗版；原 `binary_transformer.py` = 上線 OVR 訓練腳本（「binary」指每個二元分類器）。
 
@@ -249,3 +268,31 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 
 六套模型的 binary **全部以 Git LFS 入庫**（含非上線五套，供對照與回滾）；
 僅 `transformer/backend_ml_guardrail_transformer/checkpoints/`（訓練中間態）排除。
+
+---
+
+## 語料審查與清理（2026-11-26，step09）
+
+審查 `train_full_dataset.csv`（21,567 筆）發現的主要髒資料：
+
+| 問題 | 影響 |
+|---|---|
+| 592 筆 label 為小寫 `spam` | 訓練腳本 `isin(LABELS)` 直接丟棄，UCI 翻譯簡訊幾乎全數沒進訓練 |
+| ABUSIVE 有 9,223 筆來自 Jigsaw（英文維基討論頁）翻譯，佔 ABUSIVE 的 90% | 語境與客服無關、長文、大量維基編輯語境；ABUSIVE（10,268）反而多於 NORMAL（5,917） |
+| PROMPT_ATTACK 有 1,553 筆是 JailBreakV 的「圖片底部顯示…」多模態題（缺圖） | 多為無害問題（如「如何保護這項權利」），卻被標成攻擊 |
+| 翻譯失敗殘留英文 1,282 筆、翻譯/模板前綴（"OpenAI 的內容政策…"、"I will translate…"）184 筆、GCG 亂碼後綴 76 筆、ChatGPT/OPPO 雙回答殘骸 266 筆 | 雜訊（step06 翻譯失敗時保留原文） |
+| 翻譯來源 PROMPT_ATTACK 中 613 筆沒有任何注入/越獄訊號（多為仇恨言論或一般有害提問） | 類別定義混淆 |
+| NORMAL 全部是 ML_data 模板句，最長 26 字；PROMPT_ATTACK/ABUSIVE 中位數 33～44 字 | 模型學到「長訊息 ≠ NORMAL」的長度捷徑，真實長句客服提問會被誤判 |
+| NORMAL 模板大量近重複（去填充詞後 1,500+ 筆重複），切分前未做近重複去重 | 測試集與訓練集高度重疊，報告中 99～100% 的分數偏樂觀 |
+| SPAM 模板誤組出 31 筆合法通知（「若非本人請忽略」、「請備份資料」） | 標籤錯誤 |
+| 完全缺少「困難負樣本」：含立即/投資/加入/垃圾/禮品卡/網址、轉貼可疑簡訊詢問真偽等正常提問 | 與 guardrail 規則誤判同一類問題 |
+
+處理方式：`data_pipeline/step09_clean_dataset.py` → `data_set/train_full_dataset_v2.csv`（10,533 筆：NORMAL 4,691 / ABUSIVE 3,639 / SPAM 1,458 / PROMPT_ATTACK 745）。
+每一筆被移除的資料與原因在 `data_set/removed_rows_v2.csv`；另加入 `data_pipeline/curated_seed_data.py` + `curated_seed_extra.py` 的 537 筆人工撰寫樣本（NORMAL 287 / ABUSIVE 104 / PROMPT_ATTACK 88 / SPAM 58；涵蓋電商、物流、電信、3C、金融保險、訂閱、旅遊餐飲、教育，重點是長句與含敏感字眼的困難負樣本、有情緒但無髒話的抱怨、中文客服情境的注入與越權）。
+`data_set/hard_eval.csv` 為困難評估集（47 筆，不進訓練），重訓後請以它驗證誤判。六支訓練腳本的 `DATA_PATH` 已改指向 v2，舊檔保留供對照。
+
+已知限制 / 後續：
+- NORMAL 長句仍偏少（≥30 字只有 116 筆，其餘 4,500+ 筆是 ML_data 短模板句），長度捷徑只是減輕、尚未消除；重訓後請特別看 hard_eval 裡長句 NORMAL 的表現
+- PROMPT_ATTACK 只剩 745 筆，且翻譯來源有同一越獄模板的多個翻譯變體 → 建議再補中文客服情境的注入樣本
+- 標籤定義（2026-11-26 確認）：ABUSIVE = 使用者「有情緒」（不滿、焦急、失望、憤怒，有無髒話皆算），策略是先安撫再回答；ML_data 中「客服裝死不理人！準備接客訴」這類激動抱怨標 ABUSIVE 是正確的。人工種子已依此定義標註
+- v2 尚未重新訓練；上線模型仍是舊資料訓練的版本

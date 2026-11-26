@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Dict, List, Callable
 
 from .executor import execute_plan
@@ -62,6 +63,7 @@ def run_agent(
     model: str | None = None,
     session_id: int | str | None = None,
     on_chunk: Callable[[dict], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> Dict[str, Any]:
     user_msg = _extract_latest_user_message(messages)
     if not user_msg and session_id is not None:
@@ -130,6 +132,7 @@ def run_agent(
         model,
         _emit,
         augmented_history,
+        cancel_event,
     )
 
     final = "".join(final_chunks).strip()

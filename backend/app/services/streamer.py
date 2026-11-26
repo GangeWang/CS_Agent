@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 from typing import Callable, Optional
 
 import httpx
@@ -160,9 +161,25 @@ def request_stream_sync(
     model: Optional[str],
     on_chunk: Callable[[dict], None],
     conversation_history: Optional[list[dict]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> None:
+    """
+    同步串流呼叫推理服務，逐段以 on_chunk 回報 delta / done / error。
+
+    cancel_event：呼叫端（ws.py）逾時或使用者斷線時 set()，本函式會在下一個 chunk
+    主動關閉上游連線並結束（推理服務偵測到斷線後也會停止生成），不再佔用執行緒與推理名額。
+    """
     _filter = _ChannelFilter(on_chunk)
-    filtered_on_chunk = _filter.feed
+    # 是否已有任何 chunk 送到下游：一旦送出過內容，就不能再走非串流 fallback
+    # （否則使用者會看到「前半段 + 完整新回覆」重複輸出）
+    state = {"emitted": False}
+
+    def filtered_on_chunk(chunk: dict) -> None:
+        state["emitted"] = True
+        _filter.feed(chunk)
+
+    def _cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
 
     effective_system_prompt = _build_effective_system_prompt(conversation_history)
     messages = [m for m in (conversation_history or []) if m.get("role") != "system"]
@@ -196,6 +213,10 @@ def request_stream_sync(
                 return
 
             for raw in resp.iter_lines():
+                if _cancelled():
+                    # 離開 with 區塊會關閉連線，推理服務端隨之停止生成
+                    logger.info("LLM stream cancelled by caller")
+                    return
                 if not raw:
                     continue
                 line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
@@ -249,7 +270,15 @@ def request_stream_sync(
             return
 
     except Exception as e:
-        logger.warning("Stream exception, fallback to non-streaming: %s", e)
+        if _cancelled():
+            logger.info("LLM stream cancelled by caller (%s)", type(e).__name__)
+            return
+        if state["emitted"]:
+            # 串流中途斷線：已送出部分內容，不可重新生成（會重複輸出），直接回報錯誤
+            logger.warning("Stream broke after partial output, no fallback: %s", e)
+            on_chunk({"type": "error", "error": "LLM 串流中斷，請稍後再試。"})
+            return
+        logger.warning("Stream exception before any output, fallback to non-streaming: %s", e)
 
         # 非串流 fallback 是完整生成（可遠超 llama_request_timeout），使用 llama_stream_timeout
         try:
@@ -257,6 +286,9 @@ def request_stream_sync(
         except Exception as e2:
             logger.warning("LLAMA non-streaming fallback failed: %s", e2)
             filtered_on_chunk({"type": "error", "error": "LLM 連線失敗，請稍後再試。"})
+            return
+
+        if _cancelled():
             return
 
         if resp2.status_code != 200:
