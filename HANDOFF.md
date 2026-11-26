@@ -2,7 +2,8 @@
 
 > 這份文件記錄 2026-11-26 這一輪「架構技術債分析與修復」的完整狀態，讓下一位接手的人（或下一個 Claude session）不用重新問一遍就能繼續。
 > 主要變更在 [PR #35](https://github.com/GangeWang/CS_Agent/pull/35)（2026-11-26 已 merge）。
-> 同一天的第二輪（架構技術債 5、7～12、14）見第 3.4 節；13（目錄改名、清理大檔與死碼）另開一個 PR。
+> 同一天的第二輪（架構技術債 5、7～14）見第 3.4 節，在 [PR #40](https://github.com/GangeWang/CS_Agent/pull/40)。
+> **目錄 `backend/classifcation` 已改名為 `backend/classification`**，本機第一次 pull 前請先看第 4 節第 0 點。
 
 ---
 
@@ -12,7 +13,7 @@
 2026-11-26 負責人在自己的 GPU 機器上重訓了三次。hard_eval 從 47 句擴充到 199 句之後，上線流程的 macro-F1 是 **0.918**（17 句判錯、6 句 UNCERTAIN），錯誤集中在「沒有髒話的情緒」、「中文冒充權限 / 套取他人資料」、英文、離題閒聊。見第 6 節。
 針對這些情境手寫了第四批 373 句樣本（`curated_seed_targeted.py`），v2 變成 11,128 筆，**需要再 GPU 重訓一次**（第 4 節第 4 點）；重訓完再把模型 commit 進倉庫（第 4 節第 5 點）。
 另外上線的 `ws.py` 改成：模型沒把握（UNCERTAIN）時用保守回覆，不再當一般詢問放行（第 3.1 節）。
-第二輪修完了架構技術債 5、7～12、14（第 3.4 節）：async 串流、上下文跟著推理服務的 n_ctx 走、`ws_chat` 拆開、RAG 誤命中從 52/199 降到 3/199、前端狀態列改成情緒/安撫並拿掉姓名電話、GitHub Actions CI。剩下 6（等資料庫）與 13（另一個 PR）。
+第二輪修完了架構技術債 5、7～14（第 3.4 節）：async 串流、上下文跟著推理服務的 n_ctx 走、`ws_chat` 拆開、RAG 誤命中從 52/199 降到 3/199、前端狀態列改成情緒/安撫並拿掉姓名電話、GitHub Actions CI、刪除死碼與可重新產生的資料檔、目錄改名。只剩 6（等資料庫）。
 
 ---
 
@@ -94,6 +95,9 @@
 | `ba501c6` fix | 11 | RAG 改成去贅詞的 IDF 加權相似度（`RAG_MIN_SCORE` 0.4）；提示改成「僅供參考，相關才用」；攻擊與廣告不查 RAG。37 句換句話問法 31 → 37 命中正確，hard_eval 誤命中 52/199 → 3/199。`python tools/eval_rag.py` 可重現 |
 | `2f1882a` feat | 14 | 前端狀態列改成情緒與安撫的說法、拿掉姓名電話、`VITE_MODEL_NAME` 可選、`.env.example` 預設走同源；加入 vitest |
 | `1d825ac` ci | 12 | GitHub Actions：後端（不含 torch）、guardrail 模型載入（CPU torch + 極小 BERT）、推理服務（假的 llama_cpp）、前端（lint / test / build）；舊的 `tests_smoke.py` 改寫進 `tests/test_ws_integration.py` 後刪除 |
+| `ba4c63a` chore | 13 | 刪除死碼：`backend/expan.py`、`backend/test.py`（Ollama 時代）、`Front/style.txt`、`LLM_gen/Modelfile`、`index.html` 裡寫著「建立 Ollama 的智慧聊天系統」的佔位畫面、前端接舊格式的 `extractDeltaText`，以及幾個沒用到的函式。刻意保留：長期記憶 stub（等 DB）、`legacy/` 與 `data_pipeline/step01～08`（資料溯源）、`LLM_gen/model_train/` |
+| `0efbfda` chore | 13 | 移除沒用到與可重新產生的資料檔（約 42MB）：沒人用的 `spml_prompt_injection.csv`、和 `data_set/train_full_dataset.csv` 完全相同的 `deduped_full_dataset.csv`、step01～04 / 07 的中間檔。保留外部原始來源與 ollama 翻譯檔。`.gitignore` 擋住重跑產生的中間檔。git 歷史仍有這些檔案（clone 不會變小） |
+| `a26b0ff` refactor | 13 | `backend/classifcation` → `backend/classification`（guardrail MODEL_DIR、compose volume、.dockerignore、訓練腳本、測試、文件全部同步）；`train_multiclass_transformer_legacy.py` 改名為 `train_multiclass_transformer.py`（它不是廢棄腳本） |
 
 測試數量：後端 97（沒有 torch 時 95 + 模型測試 skip）、推理服務 8、前端 5。
 
@@ -101,6 +105,20 @@
 
 ## 4. 下一步（依優先順序）
 
+0. **本機第一次 pull 這批變更（目錄改名）**：舊目錄 `backend\classifcation` 裡如果有沒 commit 的重訓模型，`git pull` 會拒絕（本機修改會被覆蓋）；沒被追蹤的 `reports\`、`checkpoints\`、`all_output.txt` 則會留在舊目錄。在 `E:\CS_Agent` 用 PowerShell：
+   ```powershell
+   # 1) 想保留上次重訓的成績或模型就先備份（第四批還要重訓，模型通常不需要留）
+   New-Item -ItemType Directory E:\cs_agent_backup -Force | Out-Null
+   Copy-Item backend\classifcation\reports E:\cs_agent_backup\ -Recurse
+   # 2) 讓 git 管的檔案回到倉庫版本，再 pull
+   git checkout -- backend/classifcation
+   git pull
+   # 3) 舊目錄只剩沒被追蹤的檔案，確認備份好了再刪
+   Remove-Item backend\classifcation -Recurse -Force
+   # 4) 之後都在新目錄重訓
+   cd backend\classification; .\run_all_training.ps1
+   ```
+   如果已經用第四批重訓完、想直接用那批模型：把 `transformer\backend_ml_ovr_transformer_models_clean\` 和 `reports\` 一起備份，pull 之後複製到 `backend\classification\` 底下同樣位置。
 1. ~~Review 並 merge PR #35~~（已完成）。
 2. ~~在有 GPU 的機器上用 v2 重訓六種方法~~（2026-11-26 已完成，結果見第 6 節）。
 3. ~~用加入第三批樣本的 v2 再重訓一次~~、~~在擴充到 199 句的 hard_eval 上建立新基準~~（2026-11-26 都已完成，結果見第 6 節）。
@@ -112,7 +130,7 @@
 7. **長度捷徑**：30 字以上的訊息裡，NORMAL 只佔 14%（350 / 2,552）。199 句 hard_eval 出現了反方向的捷徑：不帶髒話的長篇抱怨（冰箱延期那句）被判成 NORMAL，因為以前的長句 ABUSIVE 幾乎都帶髒話。第四批補了 36 句長篇抱怨。**暫時不下採樣短模板 NORMAL**，等第 4 點重訓後再看。
 8. **OvR 與 4選1**：上線維持 OvR（負責人決定）。199 句 hard_eval 上 Transformer 4選1 是 0.927、OvR 是 0.913、上線流程是 0.918，差距約 3 句；而同一份資料重訓兩次，Transformer 4選1 的 test 就從 0.986 變成 0.995，差距在訓練隨機性的範圍內。第四批重訓後再比一次；4選1 的好處是推論只要 1 次 forward（OvR 要 4 次），但上線程式目前只支援 OvR。
 9. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`。現有模型已經很好，優先度低。
-10. 第 8 節剩下的技術債：13 另開 PR；6 等資料庫。
+10. 第 8 節剩下的技術債：只剩 6，等資料庫。
 11. **換成自己的 FAQ**：`backend/app/data/rag_db.json` 混了聯通電信 FAQ（約 16 筆）和手機服務中心 FAQ，還有幾筆像「已為您轉接主管，請稍後」這種會讓模型宣稱做了它其實做不到的動作的答案。換成實際要服務的產業的 FAQ 後，把 `backend/tools/rag_eval_queries.csv` 換成對應的問法，跑 `python tools/eval_rag.py` 決定 `RAG_MIN_SCORE`。
 12. **RAG 改用語意向量（可選）**：guardrail 已經載入 `paraphrase-multilingual-MiniLM-L12-v2`，可以拿來做 FAQ 檢索，能處理「被偷了」對「被盜」這種用詞完全不同的問法。sandbox 連不到 HuggingFace，沒辦法實測門檻，所以這輪先用字詞比對。
 
@@ -246,12 +264,11 @@ Transformer 要等負責人在 GPU 上重訓（第 4 節第 4 點）。sandbox �
 
 ## 8. 剩餘技術債（尚未處理）
 
-來自第一輪架構審查。5、7～12、14 已在第二輪處理（第 3.4 節），剩下：
+來自第一輪架構審查。5、7～14 已在第二輪處理（第 3.4 節），剩下：
 
 | # | 項目 | 備註 |
 |---|---|---|
 | 6 | 對話歷史存在單一行程的記憶體（TTLCache），重啟就消失，無法多 worker / 水平擴展 | **等 DB 建好再處理**；存取已集中在 `services/session_store.py` |
-| 13 | `classification/` 裡有約 100MB 的原始 CSV 和中間產物；目錄名 `classification` 拼錯；`Front/style.txt` 殘留；`backend/expan.py`、`backend/test.py` 是已失效的 Ollama 時代腳本 | 第二輪之後另開 PR，一次改乾淨 |
 | — | 前端 `App.jsx` 仍有一個既有的 lint warning（`connectWs` 的 hooks 依賴） | 不影響功能 |
 
 ---
