@@ -62,3 +62,6 @@ backend/classifcation/BILSTM/backend_ml_ovr_bilstm_models/vocab.joblib
 backend/classifcation/transformer/backend_ml_ovr_transformer_models_clean/**/training_args.bin
 LLM_gen/model_train/outputs/
 LLM_gen/*.whl
+
+# 一鍵重訓的輸出紀錄
+backend/classifcation/all_output.txt
