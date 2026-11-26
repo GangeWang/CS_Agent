@@ -1,17 +1,5 @@
-# FastAPI and server dependencies
+# 推理服務（server_llama.py）的依賴
+# llama-cpp-python 需依平台編譯（CUDA 版見 Dockerfile 的 CMAKE_ARGS），所以不放在這裡：
+#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
-python-multipart>=0.0.6
-
-# HTTP client
-httpx>=0.25.0
-
-# Settings management
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-
-# Caching
-cachetools>=5.3.0
-
-# WebSocket support
-websockets>=12.0
