@@ -101,6 +101,32 @@ def test_filter_flushes_plain_text_on_done(channel_filter_cls):
     assert any("客服" in c.get("text", "") for c in emitted if c.get("type") == "delta")
 
 
+@pytest.mark.parametrize(
+    "pieces",
+    [
+        ["ana", "lysis", "思考", "assistantfin", "al", "正式回答"],  # 無標記、marker 被切開
+        ["<|channel|>", "analysis", "<|message|>", "思考", "assistant", "<|channel|>", "final", "<|message|>", "正式回答"],
+        ["final", "正式回答"],  # 沒有 analysis，直接 final
+    ],
+)
+def test_filter_harmony_variants(channel_filter_cls, pieces):
+    emitted = []
+    f = channel_filter_cls(emitted.append)
+    for p in pieces:
+        f.feed({"type": "delta", "text": p})
+    f.feed({"type": "done"})
+    text = "".join(c.get("text", "") for c in emitted if c.get("type") == "delta")
+    assert text == "正式回答" and emitted[-1] == {"type": "done"}
+
+
+def test_strip_channel_tokens_non_stream():
+    from app.services.streamer import _strip_channel_tokens
+
+    assert _strip_channel_tokens("analysis想一想assistantfinal答案") == "答案"
+    assert _strip_channel_tokens("analysis只有思考") == ""
+    assert _strip_channel_tokens("一般回覆") == "一般回覆"
+
+
 def test_filter_passes_final_channel(channel_filter_cls):
     emitted = []
     f = channel_filter_cls(emitted.append)
@@ -377,10 +403,33 @@ def test_stream_normal_done(monkeypatch):
     out = _collect(streamer, _FakeClient(_FakeStreamResp(lines)), monkeypatch)
     assert out == [{"type": "delta", "text": "一"}, {"type": "delta", "text": "二"}, {"type": "done"}]
 
-    # 沒有 channel 標記的純文字：緩衝到 done 一次送出
+    # 開頭不像 harmony 格式的純文字：收到就逐段送出
     plain = ['data: {"text": "一"}', 'data: {"text": "二"}', "data: [DONE]"]
     out = _collect(streamer, _FakeClient(_FakeStreamResp(plain)), monkeypatch)
-    assert out == [{"type": "delta", "text": "一二"}, {"type": "done"}]
+    assert out == [{"type": "delta", "text": "一"}, {"type": "delta", "text": "二"}, {"type": "done"}]
+
+
+def test_stream_harmony_without_special_tokens(monkeypatch):
+    """llama-cpp-python 預設不印特殊標記：analysis思考…assistantfinal回覆。思考不可外洩，回覆要逐段送。"""
+    import app.services.streamer as streamer
+
+    pieces = ["analysis", "使用者在問退貨。", "assistant", "final", "您好，", "退貨請在七天內申請。"]
+    lines = ['data: {"text": "%s"}' % p for p in pieces] + ['data: {"done": true}']
+    out = _collect(streamer, _FakeClient(_FakeStreamResp(lines)), monkeypatch)
+    assert out == [
+        {"type": "delta", "text": "您好，"},
+        {"type": "delta", "text": "退貨請在七天內申請。"},
+        {"type": "done"},
+    ]
+
+
+def test_stream_reasoning_only_becomes_error(monkeypatch):
+    """思考把 max_tokens 用完、沒有 final：丟掉思考內容，回錯誤而不是空白或思考。"""
+    import app.services.streamer as streamer
+
+    lines = ['data: {"text": "analysis"}', 'data: {"text": "想了很久"}', 'data: {"done": true}']
+    out = _collect(streamer, _FakeClient(_FakeStreamResp(lines)), monkeypatch)
+    assert out == [{"type": "error", "error": streamer.NO_FINAL_ERROR}]
 
 
 def test_stream_error_payload_ends_stream(monkeypatch):

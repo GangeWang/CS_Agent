@@ -5,6 +5,10 @@ WebSocket /ws/chat：一條連線 = 一個 ChatSession。
   速率限制 → guardrail 分類 → RAG 查詢 → 組 system 指令 → 上下文管理 → 串流回覆 → 寫入歷史
 其他訊息類型：ping（含閒置警告/逾時結束）、clear_history、end_conversation。
 
+收訊迴圈和「回覆一則訊息」分開跑：回覆在背景 task（同一時間最多一則），收訊迴圈在產生回覆時
+仍然會處理 ping，所以前端的心跳不會因為回覆太久而把連線切斷。end_conversation / clear_history
+在回覆途中送來時，會先取消這次生成。
+
 前端安全規則：
 - 只把 delta / done / error 這三種串流 chunk 送給瀏覽器（另有 guardrail、pong 等控制事件）。
 - 除錯資訊一律只進後端 log，不送到 WS。
@@ -79,12 +83,16 @@ def _origin_allowed(websocket: WebSocket) -> bool:
 
 
 async def _pump_stream(
-    websocket: WebSocket,
+    websocket,
     session_id: str,
     chunks: AsyncIterator[dict],
 ) -> Tuple[List[str], str]:
     """
-    把 async 串流（delta / done / error）轉送到 WS，回傳 (assistant 文字片段, status)。
+    把 async 串流的 delta / error 轉送到 WS，回傳 (assistant 文字片段, status)。
+
+    websocket 只需要有 `async send_text(str)`。
+    **done 不在這裡送**：呼叫端先把這輪寫進歷史，再送 done。這樣前端一收到 done 就送
+    end_conversation 時，摘要一定含這一輪。
 
     status：
     - "done" / "error"：上游正常結束或回報錯誤
@@ -114,11 +122,13 @@ async def _pump_stream(
             t = chunk.get("type")
             if t not in ALLOWED_STREAM_TYPES:
                 continue  # Drop any internal/debug chunks
+            if t == "done":
+                return texts, "done"
             if t == "delta":
                 texts.append(chunk.get("text", ""))
             await websocket.send_text(json_dumps(chunk))
-            if t in ("done", "error"):
-                return texts, t
+            if t == "error":
+                return texts, "error"
     finally:
         aclose = getattr(it, "aclose", None)
         if aclose is not None:
@@ -140,9 +150,30 @@ class ChatSession:
         self._idle_warning_sent = False
         self._last_model: Optional[str] = None
         self._msg_times: deque = deque()  # 速率限制：window 內的使用者訊息時間戳
+        # 正在回覆的那一則訊息（背景 task）；同一時間最多一則
+        self._turn: Optional[asyncio.Task] = None
+        # 這一輪的串流是否還在進行；串流結束後 task 只剩收尾（寫歷史、送 done），下一則可以等它
+        self._streaming = False
+        # 收訊迴圈（pong 等）和回覆 task 會同時送訊息，用鎖確保一次只寫一個 frame
+        self._send_lock = asyncio.Lock()
+
+    async def send_text(self, text: str) -> None:
+        async with self._send_lock:
+            await self.ws.send_text(text)
 
     async def send(self, payload: dict) -> None:
-        await self.ws.send_text(json_dumps(payload))
+        await self.send_text(json_dumps(payload))
+
+    def _busy(self) -> bool:
+        return self._turn is not None and not self._turn.done()
+
+    async def _cancel_turn(self) -> None:
+        """取消進行中的回覆（關閉上游連線，推理服務停止生成），並等它收尾。"""
+        turn = self._turn
+        self._turn = None
+        if turn is not None and not turn.done():
+            turn.cancel()
+            await asyncio.gather(turn, return_exceptions=True)
 
     async def run(self) -> None:
         session_store.create(self.session_id)
@@ -157,6 +188,7 @@ class ChatSession:
         except Exception as e:
             logger.exception("Unexpected error in WebSocket handler for session %s: %s", self.session_id, e)
         finally:
+            await self._cancel_turn()
             session_store.drop(self.session_id)
             logger.info("Session cleaned up: session_id=%s", self.session_id)
 
@@ -186,13 +218,36 @@ class ChatSession:
         if kind == "ping":
             return await self._on_ping()
         if kind == "clear_history":
+            await self._cancel_turn()
             await self._on_clear_history()
             return True
         if kind == "end_conversation":
+            await self._cancel_turn()
             await self.end_conversation("manual")
             return False
-        await self._on_user_message(payload)
+        if self._busy():
+            if self._streaming:
+                await self.send({"type": "error", "error": "上一則訊息還在回覆中，請稍候。"})
+                return True
+            # 上一輪已送出 done / error，只差收尾：等它結束再處理這一則
+            await asyncio.gather(self._turn, return_exceptions=True)
+        self._streaming = True
+        self._turn = asyncio.create_task(self._run_turn(payload))
         return True
+
+    async def _run_turn(self, payload: dict) -> None:
+        try:
+            await self._on_user_message(payload)
+        except asyncio.CancelledError:
+            raise
+        except WebSocketDisconnect:
+            pass  # 收訊迴圈會收到斷線並清理
+        except Exception as e:
+            logger.exception("Turn failed for session %s: %s", self.session_id, e)
+        finally:
+            self._streaming = False
+            # 回覆結束才開始算閒置：回覆花很久時，不會一結束就被當成閒置太久
+            self._mark_active()
 
     # ---------- 控制訊息 ----------
     def _mark_active(self) -> None:
@@ -200,6 +255,10 @@ class ChatSession:
         self._idle_warning_sent = False
 
     async def _on_ping(self) -> bool:
+        if self._busy():
+            # 正在回覆不算閒置
+            await self.send({"type": "pong"})
+            return True
         idle_elapsed = self._loop.time() - self._last_dialogue_at
         if idle_elapsed > IDLE_TIMEOUT_SECONDS:
             await self.end_conversation("idle_timeout")
@@ -312,15 +371,24 @@ class ChatSession:
 
         history = await self._managed_history(system_msg["content"], user_msg, model, strategy)
 
-        if payload.get("mode") == "agent":
+        # 攻擊 / 廣告一律走一般對話（帶拒答指令），不跑 agent 的工具
+        if payload.get("mode") == "agent" and label not in REFUSED_LABELS:
             chunks = run_agent_stream([system_msg, *history, {"role": "user", "content": user_msg}], model)
         else:
             chunks = stream_chat(user_msg, model, [system_msg, *history])
 
-        texts, status = await _pump_stream(self.ws, self.session_id, chunks)
+        try:
+            texts, status = await _pump_stream(self, self.session_id, chunks)
+        finally:
+            self._streaming = False
+        if status != "done":
+            return
         reply = "".join(texts).strip()
-        if status == "done" and reply:
+        # 被拒答的訊息（攻擊 / 廣告）不寫進歷史：guardrail 只看最新一則，
+        # 如果歷史留著攻擊內容，下一句「照上面說的做」就會被判成 NORMAL、模型卻讀得到攻擊。
+        if reply and label not in REFUSED_LABELS:
             session_store.append_turn(self.session_id, user_msg, reply)
+        await self.send({"type": "done"})
 
 
 @router.websocket("/ws/chat")

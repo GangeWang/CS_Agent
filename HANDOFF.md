@@ -99,9 +99,29 @@
 | `0efbfda` chore | 13 | 移除沒用到與可重新產生的資料檔（約 42MB）：沒人用的 `spml_prompt_injection.csv`、和 `data_set/train_full_dataset.csv` 完全相同的 `deduped_full_dataset.csv`、step01～04 / 07 的中間檔。保留外部原始來源與 ollama 翻譯檔。`.gitignore` 擋住重跑產生的中間檔。git 歷史仍有這些檔案（clone 不會變小） |
 | `a26b0ff` refactor | 13 | `backend/classifcation` → `backend/classification`（guardrail MODEL_DIR、compose volume、.dockerignore、訓練腳本、測試、文件全部同步）；`train_multiclass_transformer_legacy.py` 改名為 `train_multiclass_transformer.py`（它不是廢棄腳本） |
 
-測試數量：後端 97（沒有 torch 時 95 + 模型測試 skip）、推理服務 8、前端 5。
+測試數量：後端 107 passed + 1 skip（模型測試需要 torch；第三輪後）、推理服務 8、前端 5。
 
 ---
+
+### 3.5 第三輪：全面審查後的修正（2026-11-26）
+
+| 項目 | 內容 |
+|---|---|
+| 串流與思考內容 | llama-cpp-python 轉文字時預設不印特殊標記，gpt-oss 的輸出可能是 `analysis思考…assistantfinal回覆`，舊的過濾器找不到 `<|channel|>final<|message|>`，會把整段（含思考）在最後一次送出。`streamer._ChannelFilter` 改成兩種寫法都認得：開頭像 harmony（`analysis`、`<|`…）就緩衝到 final 才逐段送；一般純文字直接串流；只有思考、沒有 final（例如 max_tokens 用完）就丟掉並回「模型這次沒有產生回覆」。非串流 fallback 共用同一套 |
+| 心跳斷線 | 回覆改在背景 task 跑，收訊迴圈在產生回覆時照樣回 pong；回覆中不算閒置，回覆結束才重新計時；回覆途中送 `end_conversation` / `clear_history` 會先取消生成；同時只處理一則訊息（第二則回「上一則訊息還在回覆中」）。`done` 改在寫入歷史之後才送。前端收到任何訊息都重置心跳計數 |
+| nginx | `proxy_set_header Host $http_host`（保留埠號）。原本 `$host` 會拿掉埠號，用 IP 或網域開 8080 時後端的同源檢查不通過（403） |
+| 拒答不進歷史 | PROMPT_ATTACK / SPAM 那一輪不寫進對話歷史，避免「先送攻擊、再說照上面做」 |
+| Agent | 攻擊 / 廣告不跑 agent，走一般拒答；`lookup_doc` stub 不再把使用者原文當成工具結果；移除會原樣回傳使用者原文的 `summarize` 工具；工具結果用 `[TOOL_RESULTS]` 標成資料 |
+
+**Docker 冒煙測試**（`docker/smoke/`，不需要 GPU）：推理服務換成假模型，前端 nginx、後端、真的 guardrail 模型照正式設定跑，`python docker/smoke/ws_smoke.py http://<IP>:8080` 檢查 health、標籤、逐段串流、回覆中 pong、思考不外洩。步驟見 `docs/docker.md` 最後一節。2026-11-26 在 sandbox 跑過兩種輸出格式都 PASS。
+
+**上 GPU 後怎麼確認串流**：直接打推理服務看原始輸出長什麼樣子
+```bash
+curl -N http://127.0.0.1:10000/api/stream -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"我想退貨"}],"max_tokens":512}'
+```
+- 看到 `analysis`…`assistantfinal`…（沒有 `<|channel|>`）或 `<|channel|>analysis<|message|>`… 都正常，後端都處理得了。
+- 再從前端問一句：回覆應該逐字出現、不含「assistantfinal」或思考內容。後端 log 出現 `Dropped … chars of model output without a final channel` 代表思考把 `LLAMA_MAX_TOKENS` 用完了，要調高（建議 1024 以上）。
 
 ## 4. 下一步（依優先順序）
 

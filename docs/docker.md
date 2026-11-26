@@ -55,3 +55,19 @@ docker compose down -v                   # 連快取一起清
 - **重訓模型免重建 image**：guardrail 模型、semantic_models、rag_db 都是掛載
 - 後端 image 內是 **CPU 版 torch**（體積小）；guardrail 若要容器內跑 CUDA，改 backend/Dockerfile（見檔內註解）
 - Session 在進程記憶體中，**勿開多 replica**
+
+## 冒煙測試（不需要 GPU）
+
+把推理服務換成假模型（真的 `server_llama.py` + 假的 `llama_cpp`），其餘照正式設定跑：前端 nginx、後端、倉庫裡真的 guardrail 模型（要先 `git lfs pull`）。適合改完程式後確認整套能起來、串流與心跳正常，再上 GPU。
+
+```bash
+docker compose -f docker-compose.yml -f docker/smoke/compose.smoke.yml up -d --build
+pip install websockets
+python docker/smoke/ws_smoke.py http://<這台機器的 IP>:8080   # 結束代碼 0 = 通過
+docker compose -f docker-compose.yml -f docker/smoke/compose.smoke.yml down
+```
+
+- 用 IP 或網域，不要用 localhost（localhost 在後端 Origin 白名單裡，測不出 nginx 有沒有保留埠號）。
+- 檢查項目：`/health` 為 ok、每句都有 guardrail 標籤、回覆逐段送出、回覆途中的 ping 有 pong、思考內容沒有外洩。
+- 假模型預設模仿 llama-cpp-python 不印特殊標記的輸出（`analysis…assistantfinal…`）；`FAKE_MODE=harmony` 改成帶 `<|channel|>` 標記的輸出。
+- 換成真的推理服務（不加 `-f docker/smoke/compose.smoke.yml`）也能跑 `ws_smoke.py`，可當上 GPU 後的驗收。
