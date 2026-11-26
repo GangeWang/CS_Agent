@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from app.routers.ws import router as ws_router
 from app.services.guardrail import classify_text, guardrail_status
+from app.services.streamer import aclose_http_client
 
 from app.config import settings
 
@@ -84,6 +85,8 @@ async def lifespan(_: FastAPI):
     )
     logger.info("Startup warmup: end")
     yield
+    # 關閉 streamer 共用的 AsyncClient 連線池
+    await aclose_http_client()
 
 
 app = FastAPI(title="CS_Agent_Backend_WS", lifespan=lifespan)

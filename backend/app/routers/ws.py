@@ -12,22 +12,22 @@ import asyncio
 import json
 import logging
 import math
-import threading
 import uuid
 from collections import deque
-from typing import Callable, Dict, List, Tuple
+from typing import AsyncIterator, Dict, List, Tuple
 from urllib.parse import urlparse
 
 from cachetools import TTLCache
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..config import settings
-from ..services.agent.runner import run_agent
+from ..services.agent.runner import run_agent_stream
 from ..services.context_manager import manage_context
 from ..services.guardrail import classify_text
 from ..services.rag import retrieve_rag_hit
-from ..services.streamer import request_stream_sync
+from ..services.streamer import generate_text, stream_chat
 from ..utils.jsonsafe import json_dumps
+from ..utils.messages import extract_latest_user_message
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -76,77 +76,54 @@ def _origin_allowed(websocket: WebSocket) -> bool:
     return False
 
 
-# 背景執行緒結束的內部訊號（不會送到前端）
-_STREAM_END = "_stream_end"
-
-
 async def _pump_stream(
     websocket: WebSocket,
     session_id: str,
-    run: Callable[[Callable[[dict], None], threading.Event], object],
-) -> Tuple[List[str], str, "asyncio.Future"]:
+    chunks: AsyncIterator[dict],
+) -> Tuple[List[str], str]:
     """
-    在執行緒池執行同步串流 run(on_chunk, cancel_event)，並把 delta/done/error 轉送到 WS。
+    把 async 串流（delta / done / error）轉送到 WS，回傳 (assistant 文字片段, status)。
 
-    回傳 (assistant_chunks, status, task)：
-    - status = "done" / "error"：上游正常結束或回報錯誤，task 即將結束
-    - status = "timeout"：兩個 chunk 間隔超過 stream_chunk_timeout，已 set cancel_event，
-      背景執行緒會在下一個 chunk 主動關閉上游連線；呼叫端不應再 await task（避免整條連線卡住）
-    使用者斷線（送出失敗）或協程被取消時同樣 set cancel_event 後往外拋。
+    status：
+    - "done" / "error"：上游正常結束或回報錯誤
+    - "timeout"：兩個 chunk 間隔超過 stream_chunk_timeout。wait_for 會取消等待中的 __anext__，
+      串流的 `async with` 隨之關閉上游連線，推理服務停止生成
+    使用者斷線（送出失敗）或協程被取消時，finally 的 aclose() 同樣會關閉上游連線，再把例外往外拋。
     """
-    loop = asyncio.get_running_loop()
-    q: asyncio.Queue = asyncio.Queue()
-    chunks: List[str] = []
-    cancel_event = threading.Event()
-
-    def on_chunk(chunk: dict) -> None:
-        try:
-            if chunk.get("type") == "delta":
-                chunks.append(chunk.get("text", ""))
-            loop.call_soon_threadsafe(q.put_nowait, chunk)
-        except Exception as cb_err:  # loop 已關閉等極端情況
-            logger.exception("on_chunk failed for session %s: %s", session_id, cb_err)
-
-    def _worker() -> object:
-        try:
-            return run(on_chunk, cancel_event)
-        finally:
-            # 不論成功、例外或取消都推一個結束訊號，避免上游例外時前端空等到逾時
-            try:
-                loop.call_soon_threadsafe(q.put_nowait, {"type": _STREAM_END})
-            except RuntimeError:
-                pass
-
-    task = loop.run_in_executor(None, _worker)
-
-    def _log_task_error(fut: "asyncio.Future") -> None:
-        if not fut.cancelled() and fut.exception() is not None:
-            logger.error("Stream worker failed for session %s: %r", session_id, fut.exception())
-
-    task.add_done_callback(_log_task_error)
-
+    texts: List[str] = []
+    it = chunks.__aiter__()
     try:
         while True:
-            chunk = await asyncio.wait_for(q.get(), timeout=settings.stream_chunk_timeout)
-            t = chunk.get("type")
-            if t == _STREAM_END:
-                # 執行緒結束卻沒送 done/error（通常是未捕捉的例外）
+            try:
+                chunk = await asyncio.wait_for(it.__anext__(), timeout=settings.stream_chunk_timeout)
+            except StopAsyncIteration:
+                # 串流結束卻沒送 done/error
                 await websocket.send_text(json_dumps({"type": "error", "error": "LLM 任務執行失敗"}))
-                return chunks, "error", task
+                return texts, "error"
+            except asyncio.TimeoutError:
+                logger.error("Streaming timeout for session %s; generation cancelled", session_id)
+                await websocket.send_text(json_dumps({"type": "error", "error": "模型回應逾時"}))
+                return texts, "timeout"
+            except Exception as e:  # 上游未捕捉的例外：細節只進 log
+                logger.error("Stream failed for session %s: %r", session_id, e)
+                await websocket.send_text(json_dumps({"type": "error", "error": "LLM 任務執行失敗"}))
+                return texts, "error"
+
+            t = chunk.get("type")
             if t not in ALLOWED_STREAM_TYPES:
                 continue  # Drop any internal/debug chunks
+            if t == "delta":
+                texts.append(chunk.get("text", ""))
             await websocket.send_text(json_dumps(chunk))
             if t in ("done", "error"):
-                return chunks, t, task
-    except asyncio.TimeoutError:
-        cancel_event.set()
-        logger.error("Streaming timeout for session %s; generation cancelled", session_id)
-        await websocket.send_text(json_dumps({"type": "error", "error": "模型回應逾時"}))
-        return chunks, "timeout", task
-    except BaseException:
-        # 斷線 / 協程取消：通知背景執行緒停止生成，釋放推理服務名額
-        cancel_event.set()
-        raise
+                return texts, t
+    finally:
+        aclose = getattr(it, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:  # 已被取消或已結束的 generator
+                pass
 
 
 def _append_and_trim_history(session_id: str, user_msg: str, assistant_msg: str) -> None:
@@ -232,33 +209,7 @@ def _build_history_for_summary(history: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def _extract_latest_user_message(messages: object) -> str | None:
-    """
-    從前端 payload.messages 取最後一筆有效 user 訊息。
-
-    支援：
-    - list[dict]（標準格式）
-    - str（降級相容，視為 user 文字）
-    """
-    if isinstance(messages, str):
-        text = messages.strip()
-        return text if text else None
-
-    if not isinstance(messages, list):
-        return None
-
-    for item in reversed(messages):
-        if not isinstance(item, dict):
-            continue
-        if item.get("role") != "user":
-            continue
-        content = item.get("content")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-    return None
-
-
-def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | None) -> str:
+async def _summarize_conversation(history: List[Dict[str, str]], model: str | None) -> str:
     if not history:
         return "本次對話沒有可摘要的內容。"
 
@@ -271,27 +222,11 @@ def _summarize_conversation_sync(history: List[Dict[str, str]], model: str | Non
         f"對話內容：\n{dialogue}"
     )
 
-    chunks: List[str] = []
-    error_text: List[str] = []
-
-    def on_chunk(chunk: dict) -> None:
-        if chunk.get("type") == "delta":
-            chunks.append(chunk.get("text", ""))
-        if chunk.get("type") == "error":
-            error_text.append(chunk.get("error", ""))
-
-    request_stream_sync(
-        summary_prompt,
-        model,
-        on_chunk,
-        None,
-    )
-
-    summary = "".join(chunks).strip()
+    summary, error = await generate_text(summary_prompt, model)
     if summary:
         return summary
-    if error_text:
-        return f"摘要產生失敗：{error_text[-1]}"
+    if error:
+        return f"摘要產生失敗：{error}"
     return "摘要產生失敗，請稍後再試。"
 
 
@@ -323,7 +258,7 @@ async def ws_chat(websocket: WebSocket) -> None:
 
     async def end_conversation(reason: str, model: str | None = None) -> None:
         history: List[Dict[str, str]] = conversation_sessions.get(session_id, [])
-        summary = await asyncio.to_thread(_summarize_conversation_sync, history, model)
+        summary = await _summarize_conversation(history, model)
         # 摘要含對話內容（可能含 PII）：log 只留前 300 字供排查，完整內容不進日誌
         logger.info("Conversation summary session_id=%s reason=%s summary=%s", session_id, reason, summary[:300])
 
@@ -384,7 +319,7 @@ async def ws_chat(websocket: WebSocket) -> None:
 
             # ---- user message ----
             messages = payload.get("messages", [])
-            user_msg = _extract_latest_user_message(messages)
+            user_msg = extract_latest_user_message(messages)
             if not user_msg:
                 await websocket.send_text(json_dumps({"type": "error", "error": "缺少使用者訊息"}))
                 continue
@@ -463,10 +398,8 @@ async def ws_chat(websocket: WebSocket) -> None:
             if not isinstance(context_strategy, str):
                 context_strategy = None
 
-            # manage_context 在 compress 策略下會「同步呼叫 LLM 做摘要」（可達數十秒），
-            # 必須放到執行緒池，否則會阻塞整個 event loop（所有連線的 ping/delta 全部停擺）
-            history, context_meta = await asyncio.to_thread(
-                manage_context,
+            # compress 策略會呼叫 LLM 做摘要（async，不阻塞 event loop）
+            history, context_meta = await manage_context(
                 history,
                 [{"role": "system", "content": effective_system_instruction}],
                 user_msg,
@@ -486,25 +419,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                 agent_messages = [{"role": "system", "content": effective_system_instruction}] + history.copy()
                 agent_messages.append({"role": "user", "content": user_msg})
 
-                chunks, status, task = await _pump_stream(
-                    websocket,
-                    session_id,
-                    lambda on_chunk, cancel: run_agent(agent_messages, model, None, on_chunk, cancel),
+                chunks, status = await _pump_stream(
+                    websocket, session_id, run_agent_stream(agent_messages, model)
                 )
-                if status != "done":
-                    continue
-
-                try:
-                    agent_result = await task
-                except Exception:
-                    agent_result = {}
-                final_text = "".join(chunks).strip() or agent_result.get("final", "")
-                if final_text:
+                final_text = "".join(chunks).strip()
+                if status == "done" and final_text:
                     _append_and_trim_history(session_id, user_msg, final_text)
-
-                # agent_trace: backend log only (NOT sent to WS)
-                logger.info("agent_result.plan=%s", agent_result.get("plan"))
-                logger.info("agent_result.tool_results=%s", agent_result.get("tool_results"))
                 continue
 
             # =========================
@@ -512,10 +432,8 @@ async def ws_chat(websocket: WebSocket) -> None:
             # =========================
             augmented_history = [{"role": "system", "content": effective_system_instruction}] + history.copy()
 
-            chunks, status, _task = await _pump_stream(
-                websocket,
-                session_id,
-                lambda on_chunk, cancel: request_stream_sync(user_msg, model, on_chunk, augmented_history, cancel),
+            chunks, status = await _pump_stream(
+                websocket, session_id, stream_chat(user_msg, model, augmented_history)
             )
             if status == "done" and chunks:
                 _append_and_trim_history(session_id, user_msg, "".join(chunks))

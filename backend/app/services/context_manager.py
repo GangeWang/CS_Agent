@@ -4,7 +4,7 @@ import logging
 from typing import Dict, List, Tuple
 
 from ..config import settings
-from .streamer import request_stream_sync
+from .streamer import generate_text
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def _format_messages(messages: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -> str | None:
+async def _summarize_context(messages: List[Dict[str, str]], model: str | None) -> str | None:
     if not messages:
         return None
 
@@ -98,24 +98,14 @@ def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -
         f"要壓縮的對話：\n{_format_messages(messages)}"
     )
 
-    chunks: List[str] = []
-    errors: List[str] = []
-
-    def on_chunk(chunk: dict) -> None:
-        if chunk.get("type") == "delta":
-            chunks.append(chunk.get("text", ""))
-        elif chunk.get("type") == "error":
-            errors.append(chunk.get("error", ""))
-
-    request_stream_sync(prompt, model, on_chunk, None)
-    summary = "".join(chunks).strip()
+    summary, error = await generate_text(prompt, model)
     if summary:
         # 摘要含對話內容：log 只留前 300 字供排查，完整內容不進日誌
         logger.debug("Context compression summary generated (first 300 chars):\n%s", summary[:300])
         return f"{SUMMARY_PREFIX}\n以下是較早對話的壓縮摘要，請視為歷史上下文依據：\n{summary}\n{SUMMARY_SUFFIX}"
 
-    if errors:
-        logger.warning("Context compression failed: %s", errors[-1])
+    if error:
+        logger.warning("Context compression failed: %s", error)
     else:
         logger.warning("Context compression returned empty summary")
     return None
@@ -137,7 +127,7 @@ def _window_history(history: List[Dict[str, str]], fixed_messages: List[Dict[str
     return selected
 
 
-def _compress_history(
+async def _compress_history(
     history: List[Dict[str, str]],
     fixed_messages: List[Dict[str, str]],
     model: str | None,
@@ -154,7 +144,7 @@ def _compress_history(
         return _window_history(summaries + recent, fixed_messages)
 
     summary_input = summaries + older
-    summary = _summarize_context_sync(summary_input, model)
+    summary = await _summarize_context(summary_input, model)
     if not summary:
         logger.warning("Falling back to context window because compression failed")
         return _window_history(history, fixed_messages)
@@ -165,7 +155,7 @@ def _compress_history(
     return compressed
 
 
-def manage_context(
+async def manage_context(
     history: List[Dict[str, str]],
     system_messages: List[Dict[str, str]],
     current_user_msg: str,
@@ -198,7 +188,7 @@ def manage_context(
     if selected_strategy == "window":
         managed = _window_history(list(history), fixed_messages)
     else:
-        managed = _compress_history(list(history), fixed_messages, model)
+        managed = await _compress_history(list(history), fixed_messages, model)
 
     after_tokens = estimate_tokens(fixed_messages + managed)
     return managed, {
