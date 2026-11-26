@@ -28,7 +28,7 @@ python3 -m pip install llama-cpp-python
 
 ```bash
 export LLAMA_MODEL_PATH=./CS_AgentV12.gguf
-export LLAMA_N_CTX=2048
+export LLAMA_N_CTX=8192   # 不設時預設 8192；docker-compose 以 LLAMA_N_CTX 統一設定（預設 32768）
 export LLAMA_N_GPU_LAYERS=32
 export LLAMA_N_THREADS=4
 export LLAMA_MAX_CONCURRENT=1
@@ -48,7 +48,14 @@ uvicorn server_llama:app --host 0.0.0.0 --port 10000
 
 ### `GET /health`
 
-簡單健康檢查，會嘗試觸發一次極短推理。
+回報模型是否載入與設定，**不跑推理**（不會跟正常請求搶推理名額）：
+
+```json
+{"status": "ok", "model": "CS_AgentV12.gguf", "n_ctx": 32768, "max_concurrent": 1, "busy": false}
+```
+
+後端會讀 `n_ctx`，把對話的上下文預算限制在模型實際支援的長度內。
+`GET /health?deep=true` 才會實際生成 1 個 token 確認推理正常（忙碌時 15 秒內拿不到名額回 503）。
 
 ### `POST /api/generate`
 
@@ -63,13 +70,24 @@ uvicorn server_llama:app --host 0.0.0.0 --port 10000
 
 ### `POST /api/stream`
 
-串流回應（SSE）：
+串流回應（SSE）。後端實際送的格式（`messages` 不含 system；`system_prompt` 會放在最前面）：
 
 ```json
 {
-  "prompt": "你好",
-  "max_tokens": 128
+  "system_prompt": "你是客服助理……",
+  "messages": [{"role": "user", "content": "你好"}],
+  "max_tokens": 512
 }
+```
+
+回應每段是 `data: {"text": "..."}`，結束是 `data: {"done": true}`，錯誤是 `data: {"error": "generation failed"}`（錯誤細節只進服務端 log）。
+沒有 `messages` 時會把 `prompt` 當成單一則 user 訊息。
+
+### 測試
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/          # 用假的 llama_cpp 模組，不需要 GPU
 ```
 
 ---

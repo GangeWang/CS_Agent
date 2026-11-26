@@ -1,4 +1,4 @@
-"""classifcation/common.py：六種訓練方式共用的切分 / 門檻 / 決策邏輯（純 numpy/pandas/sklearn，不需模型）。"""
+"""classification/common.py：六種訓練方式共用的切分 / 門檻 / 決策邏輯（純 numpy/pandas/sklearn，不需模型）。"""
 from __future__ import annotations
 
 import sys
@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-CLS_DIR = Path(__file__).resolve().parents[1] / "classifcation"
+CLS_DIR = Path(__file__).resolve().parents[1] / "classification"
 sys.path.insert(0, str(CLS_DIR))
 
 C = pytest.importorskip("common")

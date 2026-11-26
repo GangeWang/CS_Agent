@@ -283,7 +283,7 @@ class RSMTester:
             }
 
         # 2. Semantic
-        sem_label, sem_sim, sem_text, topk = self.semantic_predict(text)
+        sem_label, sem_sim, _sem_text, topk = self.semantic_predict(text)
 
         # Top-K 加權分數
         scores = {}

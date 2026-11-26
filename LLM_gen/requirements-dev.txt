@@ -1,0 +1,4 @@
+# 測試用（tests/ 以假的 llama_cpp 模組執行，不需要 GPU 或 llama-cpp-python）
+-r requirements.txt
+pytest>=8.0
+httpx>=0.25.0

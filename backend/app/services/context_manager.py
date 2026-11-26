@@ -4,12 +4,10 @@ import logging
 from typing import Dict, List, Tuple
 
 from ..config import settings
-from .streamer import request_stream_sync
+from . import inference_info
+from .streamer import SYSTEM_PROMPT, generate_text
 
 logger = logging.getLogger(__name__)
-
-# 預設上下文上限（tokens）；部署可透過 LLAMA_CONTEXT_MAX_TOKENS 覆蓋
-DEFAULT_CONTEXT_MAX_TOKENS = 128 * 1024
 
 SUMMARY_ROLE = "system"
 SUMMARY_PREFIX = "[CONVERSATION_SUMMARY]"
@@ -34,14 +32,22 @@ def estimate_tokens(messages: List[Dict[str, str]]) -> int:
     return total
 
 
-def _configured_context_max_tokens() -> int:
-    # 預設 128K tokens；VRAM/RAM 受限時可透過 LLAMA_CONTEXT_MAX_TOKENS 調低
-    return max(256, int(getattr(settings, "llama_context_max_tokens", DEFAULT_CONTEXT_MAX_TOKENS)))
+def effective_context_max_tokens() -> int:
+    """
+    模型上下文上限 = min(LLAMA_CONTEXT_MAX_TOKENS, 推理服務 /health 回報的 n_ctx)。
+
+    推理服務還沒回報（沒連上或舊版）時只用設定值；設定值預設 32768，與 docker-compose 的 LLAMA_N_CTX 一致。
+    """
+    configured = max(256, int(settings.llama_context_max_tokens))
+    reported = inference_info.reported_n_ctx()
+    return min(configured, reported) if reported else configured
 
 
 def _context_budget_tokens() -> int:
-    max_context = _configured_context_max_tokens()
-    reserved = max(0, int(getattr(settings, "llama_context_reserved_output_tokens", 4096)))
+    max_context = effective_context_max_tokens()
+    reserved = max(0, int(settings.llama_context_reserved_output_tokens))
+    # 小 context（例如 n_ctx=4096）時，預留量不能把整個預算吃光：最多預留一半
+    reserved = min(reserved, max_context // 2)
     return max(128, max_context - reserved)
 
 
@@ -51,7 +57,8 @@ def _threshold_tokens() -> int:
     return max(128, int(_context_budget_tokens() * ratio))
 
 
-def _is_summary_message(message: Dict[str, str]) -> bool:
+def is_summary_message(message: Dict[str, str]) -> bool:
+    """壓縮後的較早對話摘要（以 system 訊息存放在歷史最前面）。"""
     return message.get("role") == SUMMARY_ROLE and message.get("content", "").startswith(SUMMARY_PREFIX)
 
 
@@ -59,7 +66,7 @@ def _split_summary_and_dialogue(history: List[Dict[str, str]]) -> Tuple[List[Dic
     summaries: List[Dict[str, str]] = []
     dialogue: List[Dict[str, str]] = []
     for item in history:
-        if _is_summary_message(item):
+        if is_summary_message(item):
             summaries.append(item)
         else:
             dialogue.append(item)
@@ -68,7 +75,7 @@ def _split_summary_and_dialogue(history: List[Dict[str, str]]) -> Tuple[List[Dic
 
 def _format_messages(messages: List[Dict[str, str]]) -> str:
     role_names = {
-        "system": "系統摘要",
+        "system": "較早對話摘要",
         "user": "使用者",
         "assistant": "客服助手",
     }
@@ -82,7 +89,7 @@ def _format_messages(messages: List[Dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -> str | None:
+async def _summarize_context(messages: List[Dict[str, str]], model: str | None) -> str | None:
     if not messages:
         return None
 
@@ -98,24 +105,14 @@ def _summarize_context_sync(messages: List[Dict[str, str]], model: str | None) -
         f"要壓縮的對話：\n{_format_messages(messages)}"
     )
 
-    chunks: List[str] = []
-    errors: List[str] = []
-
-    def on_chunk(chunk: dict) -> None:
-        if chunk.get("type") == "delta":
-            chunks.append(chunk.get("text", ""))
-        elif chunk.get("type") == "error":
-            errors.append(chunk.get("error", ""))
-
-    request_stream_sync(prompt, model, on_chunk, None)
-    summary = "".join(chunks).strip()
+    summary, error = await generate_text(prompt, model)
     if summary:
         # 摘要含對話內容：log 只留前 300 字供排查，完整內容不進日誌
         logger.debug("Context compression summary generated (first 300 chars):\n%s", summary[:300])
         return f"{SUMMARY_PREFIX}\n以下是較早對話的壓縮摘要，請視為歷史上下文依據：\n{summary}\n{SUMMARY_SUFFIX}"
 
-    if errors:
-        logger.warning("Context compression failed: %s", errors[-1])
+    if error:
+        logger.warning("Context compression failed: %s", error)
     else:
         logger.warning("Context compression returned empty summary")
     return None
@@ -137,7 +134,7 @@ def _window_history(history: List[Dict[str, str]], fixed_messages: List[Dict[str
     return selected
 
 
-def _compress_history(
+async def _compress_history(
     history: List[Dict[str, str]],
     fixed_messages: List[Dict[str, str]],
     model: str | None,
@@ -154,7 +151,7 @@ def _compress_history(
         return _window_history(summaries + recent, fixed_messages)
 
     summary_input = summaries + older
-    summary = _summarize_context_sync(summary_input, model)
+    summary = await _summarize_context(summary_input, model)
     if not summary:
         logger.warning("Falling back to context window because compression failed")
         return _window_history(history, fixed_messages)
@@ -165,7 +162,7 @@ def _compress_history(
     return compressed
 
 
-def manage_context(
+async def manage_context(
     history: List[Dict[str, str]],
     system_messages: List[Dict[str, str]],
     current_user_msg: str,
@@ -183,7 +180,12 @@ def manage_context(
     if selected_strategy not in {"compress", "window"}:
         selected_strategy = "compress"
 
-    fixed_messages = system_messages + [{"role": "user", "content": current_user_msg}]
+    # streamer 會在最前面加上 SYSTEM_PROMPT，估算時一併算進去
+    fixed_messages = (
+        [{"role": "system", "content": SYSTEM_PROMPT}]
+        + system_messages
+        + [{"role": "user", "content": current_user_msg}]
+    )
     before_tokens = estimate_tokens(fixed_messages + history)
 
     if before_tokens <= _threshold_tokens():
@@ -198,7 +200,7 @@ def manage_context(
     if selected_strategy == "window":
         managed = _window_history(list(history), fixed_messages)
     else:
-        managed = _compress_history(list(history), fixed_messages, model)
+        managed = await _compress_history(list(history), fixed_messages, model)
 
     after_tokens = estimate_tokens(fixed_messages + managed)
     return managed, {
@@ -208,3 +210,24 @@ def manage_context(
         "after_tokens": after_tokens,
         "dropped_messages": max(0, len(history) - len(managed)),
     }
+
+
+async def summarize_conversation(history: List[Dict[str, str]], model: str | None) -> str:
+    """對話結束（手動或閒置逾時）時給使用者看的摘要；失敗時回固定文案。"""
+    dialogue = _format_messages(history)
+    if not dialogue:
+        return "本次對話沒有可摘要的內容。"
+
+    prompt = (
+        "請用繁體中文整理以下客服對話摘要，格式需包含：\n"
+        "1. 問題重點\n"
+        "2. 已提供的協助\n"
+        "3. 後續建議（若無則寫無）\n\n"
+        f"對話內容：\n{dialogue}"
+    )
+    summary, error = await generate_text(prompt, model)
+    if summary:
+        return summary
+    if error:
+        logger.warning("Conversation summary failed: %s", error)
+    return "摘要產生失敗，請稍後再試。"

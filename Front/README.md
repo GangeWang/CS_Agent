@@ -37,6 +37,7 @@ npm run dev
 
 ```bash
 npm run lint
+npm test        # vitest：狀態列邏輯
 npm run build
 npm run preview
 ```
@@ -45,24 +46,34 @@ npm run preview
 
 ## WebSocket 連線設定
 
-預設連線規則：
+預設連「同源」的 `/ws/chat`，不需要任何環境變數：
 
-- 使用當前頁面 host
-- 預設 port 為 `8000`
-- path 為 `/ws/chat`
+- 開發（`npm run dev`）：`vite.config.js` 把 `/ws/chat` 代理到 `ws://localhost:8000`
+- docker-compose：nginx 把 `/ws/chat` 反代到 backend
 
-可用環境變數覆蓋：
+只有前端與後端不在同一個 host、中間又沒有反代時，才在 `.env` 設定其中一個（見 `.env.example`）：
 
 ```bash
 VITE_WS_URL=ws://your-host:8000/ws/chat
-# 或只覆蓋 port
+# 或只指定 port（host 沿用目前頁面）
 VITE_WS_PORT=8000
 ```
+
+`VITE_MODEL_NAME`（可選）：送給後端的模型名稱；後端目前不會轉送給推理服務，沒設定就不送。
+
+---
+
+## 狀態列
+
+每則訊息後依後端回傳的 guardrail label 更新（邏輯在 `src/guardrailUi.js`）：
+
+- `ABUSIVE`（客人有情緒）：「偵測到情緒，已切換安撫模式」，並顯示「情緒強度 x/5」；每則有情緒的訊息 +1，平穩的訊息 -1
+- `PROMPT_ATTACK` / `SPAM`：「偵測到高風險請求」，不改變情緒強度
+- 其他：「正常」
 
 ---
 
 ## 開發提醒
 
 - 後端事件型別若變更，需同步調整 `src/App.jsx` 的 `handleWsPayload`。
-- 若要優化首屏體驗，可將初始歡迎訊息與個資表單拆成獨立元件。
 - lint/build 需在 Node.js 18+ 環境下執行。

@@ -3,7 +3,7 @@
 
 為什麼要共用（2026-11-26 訓練腳本審查）：
 - 各腳本原本各自切分與去重（4選1 先去重再切、OvR 先切再只對 train 去重），測試集不同，結果無法比較
-- 輸出路徑原本是相對 CWD，run_all_training.ps1 在 classifcation/ 執行時，模型會寫到 guardrail 讀不到的位置
+- 輸出路徑原本是相對 CWD，run_all_training.ps1 在 classification/ 執行時，模型會寫到 guardrail 讀不到的位置
 - OvR 只報告 4 個二元模型各自的分數，上線實際的「過門檻取最高、都沒過 → UNCERTAIN」決策從未被評估
 - 門檻搜尋區間 0.30～0.90、平手取最小值：上線 4 個門檻全是 0.30（區間下限），代表沒有真正選過
 
@@ -22,7 +22,7 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support
 from sklearn.model_selection import train_test_split
 
-ROOT = Path(__file__).resolve().parent  # backend/classifcation
+ROOT = Path(__file__).resolve().parent  # backend/classification
 DATA_PATH = ROOT / "data_set" / "train_full_dataset_v2.csv"
 HARD_EVAL_PATH = ROOT / "data_set" / "hard_eval.csv"
 REPORT_DIR = ROOT / "reports"
@@ -198,7 +198,7 @@ def evaluate_split(texts: Sequence[str], y_true: Sequence[str], y_pred: Sequence
 
 
 def save_report(method: str, payload: dict) -> Path:
-    """各方法的評估結果統一存到 classifcation/reports/<method>.json，方便六種方法並排比較。"""
+    """各方法的評估結果統一存到 classification/reports/<method>.json，方便六種方法並排比較。"""
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     path = REPORT_DIR / f"{method}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=float), encoding="utf-8")

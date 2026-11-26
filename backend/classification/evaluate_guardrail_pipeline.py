@@ -9,7 +9,7 @@
 - 共用切分的 test（common.split_dataset）；注意若上線模型不是用 v2 + 本切分訓練的，test 可能與其訓練資料重疊
 
 用法（於任意目錄執行，需 torch / transformers / sentence-transformers 與 LFS 模型檔）：
-    python backend/classifcation/evaluate_guardrail_pipeline.py [--skip-test]
+    python backend/classification/evaluate_guardrail_pipeline.py [--skip-test]
 報告存 reports/pipeline.json（含各 stage 命中比例與錯誤樣本）。
 
 上線 guardrail 預設用 CPU；本腳本在沒有設定 GUARDRAIL_DEVICE 時改用 cuda（沒有 GPU 會自動退回 CPU），
@@ -30,15 +30,15 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))  # backend/，讓 app.services.guardrail 可 import
 import common as C  # noqa: E402
 
-# 必須在 import guardrail 之前設定（guardrail 在 import 時讀取）
+# 必須在 guardrail 第一次載入模型之前設定（get_device() 第一次呼叫時讀取）
 os.environ.setdefault("GUARDRAIL_DEVICE", "cuda")
 
 
 def run(texts, y_true, title):
-    from app.services.guardrail import DEVICE, classify_text
+    from app.services.guardrail import classify_text, get_device
 
     n = len(texts)
-    print(f"[{title}] {n} 句，guardrail device = {DEVICE}", flush=True)
+    print(f"[{title}] {n} 句，guardrail device = {get_device()}", flush=True)
     outs = []
     for i, t in enumerate(texts, 1):
         outs.append(classify_text(str(t)))

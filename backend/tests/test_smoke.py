@@ -152,6 +152,39 @@ def test_guardrail_status_reflects_failure(guardrail, monkeypatch):
     assert st["loaded"] is False and st["error"]
 
 
+def test_guardrail_load_failure_cooldown(guardrail, monkeypatch):
+    """模型載入失敗後，冷卻期內不再每則訊息都重新載入。"""
+    calls = []
+
+    def _counting_broken_load():
+        calls.append(1)
+        raise RuntimeError("missing model")
+
+    monkeypatch.setattr(guardrail, "_load_guardrail_resources", _counting_broken_load)
+    monkeypatch.setitem(guardrail._LOAD_FAILURE, "at", None)
+    monkeypatch.setattr(guardrail, "LOAD_RETRY_COOLDOWN_SECONDS", 60.0)
+    for _ in range(3):
+        assert guardrail.classify_text("hello")["available"] is False
+    assert len(calls) == 1
+
+    monkeypatch.setattr(guardrail, "LOAD_RETRY_COOLDOWN_SECONDS", 0.0)
+    guardrail.classify_text("hello")
+    assert len(calls) == 2  # 冷卻結束後會重試
+
+
+def test_guardrail_import_is_lightweight():
+    """import guardrail 不可載入 torch / transformers（延遲到第一次分類）。"""
+    import subprocess
+
+    code = (
+        "import sys; import app.services.guardrail as g; "
+        "assert 'torch' not in sys.modules and 'transformers' not in sys.modules "
+        "and 'sentence_transformers' not in sys.modules, sorted(m for m in sys.modules if 'torch' in m)"
+    )
+    subprocess.run([sys.executable, "-c", code], cwd=BACKEND_DIR, check=True,
+                   env={**os.environ, "PYTHONPATH": str(BACKEND_DIR)})
+
+
 # ---------- RAG ----------
 def test_rag_exact_and_ngram(tmp_path, monkeypatch):
     import app.services.rag as rag
@@ -165,10 +198,10 @@ def test_rag_exact_and_ngram(tmp_path, monkeypatch):
     monkeypatch.setattr(rag, "_cached_mtime", None)
 
     hit = rag.retrieve_rag_hit("退貨流程是什麼")
-    assert hit is not None and hit.score == 9999 and "7 天" in hit.answer
+    assert hit is not None and hit.score == 1.0 and "7 天" in hit.answer
 
     hit2 = rag.retrieve_rag_hit("我想問退貨流程")
-    assert hit2 is not None and hit2.score >= 3
+    assert hit2 is not None and 0.4 <= hit2.score < 1.0
 
 
 # ---------- agent ----------
@@ -248,106 +281,172 @@ def test_whitelist_subdomain_and_env(guardrail, monkeypatch):
     assert not guardrail.is_whitelisted_url("https://notsamsung.com/a", wl)
 
 
-# ---------- streamer：中途斷線不重複輸出、可取消 ----------
+# ---------- streamer（async）：中途斷線不重複輸出、可取消 ----------
 class _FakeStreamResp:
     status_code = 200
 
-    def __init__(self, lines, fail_after=None, on_line=None):
+    def __init__(self, lines, fail_after=None, fail_on_enter=False):
         self._lines = lines
         self._fail_after = fail_after
-        self._on_line = on_line
+        self._fail_on_enter = fail_on_enter
+        self.closed = False
 
-    def __enter__(self):
+    async def __aenter__(self):
+        if self._fail_on_enter:
+            raise RuntimeError("connection refused")
         return self
 
-    def __exit__(self, *a):
+    async def __aexit__(self, *a):
+        self.closed = True  # 離開 async with = 關閉上游連線
         return False
 
-    def iter_lines(self):
+    async def aread(self):
+        return b""
+
+    async def aiter_lines(self):
         for i, line in enumerate(self._lines):
             if self._fail_after is not None and i == self._fail_after:
                 raise RuntimeError("connection reset")
-            if self._on_line:
-                self._on_line(i)
             yield line
 
 
 class _FakeClient:
-    def __init__(self, resp):
+    def __init__(self, resp, post_text=None):
         self.resp = resp
         self.post_calls = 0
+        self.post_text = post_text
 
     def stream(self, *a, **k):
         return self.resp
 
-    def post(self, *a, **k):
+    async def post(self, *a, **k):
         self.post_calls += 1
-        raise AssertionError("fallback must not be called")
+        if self.post_text is None:
+            raise AssertionError("fallback must not be called")
+
+        class _R:
+            status_code = 200
+            text = ""
+
+            def json(_self):
+                return {"text": self.post_text}
+
+        return _R()
 
 
-def _collect(streamer, client, monkeypatch, cancel_event=None):
+# 有 final channel 標記時才會逐段送出；沒有標記的純文字由 _ChannelFilter 緩衝到 done 才一次送出
+FINAL = "<|channel|>final<|message|>"
+
+
+def _collect(streamer, client, monkeypatch):
+    import asyncio
+
     monkeypatch.setattr(streamer, "_get_http_client", lambda: client)
-    out = []
-    streamer.request_stream_sync("hi", None, out.append, None, cancel_event)
-    return out
+
+    async def go():
+        return [c async for c in streamer.stream_chat("hi", None, None)]
+
+    return asyncio.run(go())
 
 
 def test_stream_midway_failure_no_fallback(monkeypatch):
     import app.services.streamer as streamer
 
-    lines = ['data: {"text": "您好，"}', 'data: {"text": "第二段"}']
+    lines = ['data: {"text": "' + FINAL + '您好，"}', 'data: {"text": "第二段"}']
     client = _FakeClient(_FakeStreamResp(lines, fail_after=1))
     out = _collect(streamer, client, monkeypatch)
     assert client.post_calls == 0
+    assert out[0] == {"type": "delta", "text": "您好，"}
     assert [c["type"] for c in out][-1] == "error"
 
 
-def test_stream_cancel_stops_early(monkeypatch):
-    import threading
+def test_stream_fallback_only_before_any_output(monkeypatch):
     import app.services.streamer as streamer
 
-    cancel = threading.Event()
-    lines = ['data: {"text": "一"}', 'data: {"text": "二"}', 'data: {"text": "三"}']
-    client = _FakeClient(_FakeStreamResp(lines, on_line=lambda i: cancel.set() if i == 0 else None))
-    out = _collect(streamer, client, monkeypatch, cancel)
-    assert client.post_calls == 0
-    assert not any(c.get("type") == "done" for c in out)
+    client = _FakeClient(_FakeStreamResp([], fail_on_enter=True), post_text="完整回覆")
+    out = _collect(streamer, client, monkeypatch)
+    assert client.post_calls == 1
+    assert out == [{"type": "delta", "text": "完整回覆"}, {"type": "done"}]
 
 
-# ---------- ws：逾時不阻塞、會取消背景生成 ----------
+def test_stream_normal_done(monkeypatch):
+    import app.services.streamer as streamer
+
+    lines = ['data: {"text": "' + FINAL + '一"}', "", 'data: {"text": "二"}', 'data: {"done": true}',
+             'data: {"text": "多的"}']
+    out = _collect(streamer, _FakeClient(_FakeStreamResp(lines)), monkeypatch)
+    assert out == [{"type": "delta", "text": "一"}, {"type": "delta", "text": "二"}, {"type": "done"}]
+
+    # 沒有 channel 標記的純文字：緩衝到 done 一次送出
+    plain = ['data: {"text": "一"}', 'data: {"text": "二"}', "data: [DONE]"]
+    out = _collect(streamer, _FakeClient(_FakeStreamResp(plain)), monkeypatch)
+    assert out == [{"type": "delta", "text": "一二"}, {"type": "done"}]
+
+
+def test_stream_error_payload_ends_stream(monkeypatch):
+    import app.services.streamer as streamer
+
+    lines = ['data: {"error": "generation failed"}', 'data: {"text": "不該出現"}']
+    out = _collect(streamer, _FakeClient(_FakeStreamResp(lines)), monkeypatch)
+    assert [c["type"] for c in out] == ["error"]
+
+
+def test_stream_aclose_closes_upstream(monkeypatch):
+    """呼叫端停止迭代（逾時 / 斷線）時，上游連線要被關閉，推理服務才會停止生成。"""
+    import asyncio
+    import app.services.streamer as streamer
+
+    resp = _FakeStreamResp(['data: {"text": "' + FINAL + '一"}', 'data: {"text": "二"}', 'data: {"text": "三"}'])
+    monkeypatch.setattr(streamer, "_get_http_client", lambda: _FakeClient(resp))
+
+    async def go():
+        agen = streamer.stream_chat("hi", None, None)
+        first = await agen.__anext__()
+        await agen.aclose()
+        return first
+
+    assert asyncio.run(go()) == {"type": "delta", "text": "一"}
+    assert resp.closed is True
+
+
+# ---------- ws：逾時不阻塞、會關閉上游 ----------
 class _SendRecorder:
-    def __init__(self):
+    def __init__(self, fail=False):
         self.sent = []
+        self.fail = fail
 
     async def send_text(self, text):
+        if self.fail:
+            raise RuntimeError("client disconnected")
         self.sent.append(json.loads(text))
 
 
 def test_pump_stream_timeout_cancels(monkeypatch):
     import asyncio
-    import threading
     import time
     import app.routers.ws as ws
 
     monkeypatch.setattr(ws.settings, "stream_chunk_timeout", 0.2)
-    seen_cancel = threading.Event()
+    state = {"cleaned_up": False}
 
-    def slow_run(on_chunk, cancel):
-        on_chunk({"type": "delta", "text": "部分"})
-        if cancel.wait(5):
-            seen_cancel.set()
+    async def slow():
+        try:
+            yield {"type": "delta", "text": "部分"}
+            await asyncio.sleep(5)
+            yield {"type": "done"}
+        finally:
+            state["cleaned_up"] = True  # 模擬 async with 關閉上游連線
 
     async def go():
         rec = _SendRecorder()
         t0 = time.monotonic()
-        chunks, status, task = await ws._pump_stream(rec, "s1", slow_run)
-        elapsed = time.monotonic() - t0
-        await asyncio.wait_for(task, 2)
-        return rec, chunks, status, elapsed
+        chunks, status = await ws._pump_stream(rec, "s1", slow())
+        return rec, chunks, status, time.monotonic() - t0
 
     rec, chunks, status, elapsed = asyncio.run(go())
     assert status == "timeout" and elapsed < 2
-    assert seen_cancel.is_set()
+    assert chunks == ["部分"]
+    assert state["cleaned_up"] is True
     assert rec.sent[-1] == {"type": "error", "error": "模型回應逾時"}
 
 
@@ -355,35 +454,53 @@ def test_pump_stream_worker_exception_reports_error():
     import asyncio
     import app.routers.ws as ws
 
-    def boom(on_chunk, cancel):
+    async def boom():
         raise RuntimeError("boom")
+        yield  # pragma: no cover  讓它成為 async generator
 
     async def go():
         rec = _SendRecorder()
-        _, status, task = await ws._pump_stream(rec, "s2", boom)
-        try:
-            await task
-        except RuntimeError:
-            pass
+        _, status = await ws._pump_stream(rec, "s2", boom())
         return rec, status
 
     rec, status = asyncio.run(go())
-    assert status == "error" and rec.sent[-1]["type"] == "error"
+    assert status == "error" and rec.sent[-1] == {"type": "error", "error": "LLM 任務執行失敗"}
+
+
+def test_pump_stream_disconnect_closes_upstream():
+    import asyncio
+    import app.routers.ws as ws
+
+    state = {"cleaned_up": False}
+
+    async def gen():
+        try:
+            yield {"type": "delta", "text": "一"}
+            yield {"type": "done"}
+        finally:
+            state["cleaned_up"] = True
+
+    async def go():
+        with pytest.raises(RuntimeError):
+            await ws._pump_stream(_SendRecorder(fail=True), "s3", gen())
+
+    asyncio.run(go())
+    assert state["cleaned_up"] is True
 
 
 def test_degraded_instruction_not_normal():
-    import app.routers.ws as ws
+    from app.services.instructions import build_guardrail_instruction
 
-    text = ws._build_guardrail_instruction("UNCERTAIN", degraded=True)
+    text = build_guardrail_instruction("UNCERTAIN", degraded=True)
     assert "NORMAL" not in text and "UNVERIFIED" in text
-    assert "NORMAL" in ws._build_guardrail_instruction("NORMAL", degraded=False)
+    assert "NORMAL" in build_guardrail_instruction("NORMAL", degraded=False)
 
 
 def test_uncertain_instruction_is_guarded():
     """模型沒把握（UNCERTAIN）時不可當成 NORMAL：照常回答，但守住設定、他人個資與帳務異動。"""
-    import app.routers.ws as ws
+    from app.services.instructions import build_guardrail_instruction
 
-    text = ws._build_guardrail_instruction("UNCERTAIN", degraded=False)
+    text = build_guardrail_instruction("UNCERTAIN", degraded=False)
     assert "GuardrailLabel=UNCERTAIN" in text and "GuardrailLabel=NORMAL" not in text
     for must in ("系統設定", "其他人的個人資料", "自稱主管", "同理"):
         assert must in text

@@ -507,136 +507,6 @@ body::after {
 }
 
 /* ============================================
-   Profile 頁面
-   ============================================ */
-.profile-page {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
-    padding: var(--spacing-lg);
-    position: relative;
-    overflow: hidden;
-    z-index: 1;
-}
-
-/* 浮動裝飾 */
-.profile-page::before {
-    content: "";
-    position: fixed;
-    top: -30%;
-    right: -10%;
-    width: 800px;
-    height: 800px;
-    background: radial-gradient(circle, var(--bg-gradient-1), transparent);
-    border-radius: 50%;
-    animation: float 12s ease-in-out infinite;
-    z-index: -1;
-}
-
-.profile-page::after {
-    content: "";
-    position: fixed;
-    bottom: -20%;
-    left: -5%;
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, var(--bg-gradient-2), transparent);
-    border-radius: 50%;
-    animation: float 15s ease-in-out infinite reverse;
-    z-index: -1;
-}
-
-.profile-card {
-    width: 100%;
-    max-width: 450px;
-    background: rgba(var(--bg-secondary-rgb), 0.7);
-    backdrop-filter: blur(30px);
-    border: 1px solid rgba(var(--primary-rgb), 0.2);
-    border-radius: var(--radius-xl);
-    padding: var(--spacing-2xl);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(var(--primary-rgb), 0.1);
-    animation: slideUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-    position: relative;
-    z-index: 10;
-}
-
-.profile-card::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--primary), transparent);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-}
-
-.profile-card h1 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: var(--spacing-lg);
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.profile-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-md);
-}
-
-.profile-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-sm);
-    font-size: 0.95rem;
-}
-
-.profile-field label {
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.profile-field input {
-    width: 100%;
-    padding: var(--spacing-md) var(--spacing-lg);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
-    background: rgba(var(--text-primary-rgb), 0.04);
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    transition: all var(--transition-normal);
-}
-
-.profile-field input::placeholder {
-    color: var(--text-placeholder);
-}
-
-.profile-field input:focus {
-    outline: none;
-    background: rgba(var(--text-primary-rgb), 0.08);
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
-}
-
-.profile-error {
-    color: var(--error);
-    font-size: 0.9rem;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background: rgba(255, 127, 127, 0.1);
-    border-radius: var(--radius-md);
-    border-left: 3px solid var(--error);
-}
-
-.profile-submit {
-    margin-top: var(--spacing-sm);
-}
-
-/* ============================================
    Header / 標題區域
    ============================================ */
 .header {
@@ -712,13 +582,6 @@ body::after {
     margin: 0;
     font-size: 1.25rem;
     font-weight: 600;
-}
-
-.header .title-card .sub {
-    margin-top: 6px;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    font-weight: 500;
 }
 
 .guardrail-status {
@@ -1240,8 +1103,6 @@ body::after {
 }
 
 @media (max-width: 640px) {
-    .profile-card { padding: var(--spacing-lg); }
-    .profile-card h1 { font-size: 1.3rem; }
     .header { padding: var(--spacing-md) var(--spacing-lg); margin-top: 16px; width: calc(100% - 16px); }
     .header h1 { font-size: 1rem; }
     .chat-area .inner { padding: 0 var(--spacing-md); }

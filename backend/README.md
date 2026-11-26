@@ -2,7 +2,7 @@
 
 本目錄提供 CS_Agent 的 **FastAPI 後端**，負責 **WebSocket 聊天會話、Guardrail 文字分類、LLM 串流推理** 與基礎健康檢查。
 
-> 本文件**不覆蓋** `backend/classifcation/` 的細節。
+> 本文件**不覆蓋** `backend/classification/` 的細節。
 
 ---
 
@@ -29,7 +29,7 @@ backend/
 │   └── services/
 │       ├── guardrail.py     # 文字分類
 │       └── streamer.py      # LLM 串流請求
-├── classifcation/           # 分類資料/訓練相關（另行維護）
+├── classification/           # 分類資料/訓練相關（另行維護）
 ├── requirements.txt
 └── .env.example
 ```
@@ -65,8 +65,8 @@ cp .env.example .env
 - `LLAMA_API_URL`：LLM 推理服務 URL
 - `LLAMA_API_KEY`：若推理服務需要金鑰
 - `MAX_MESSAGE_SIZE`：WebSocket 訊息大小上限
-- `HISTORY_MAX_LENGTH`：每個 session 的歷史訊息上限
-- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：模型上下文視窗與預留輸出 token；預設參考 Ollama `gpt-oss:20b` 的 128K context window，設定為 `131072` 並預留 `4096` token 給輸出，避免 prompt 撐爆模型限制
+- `HISTORY_MAX_LENGTH`：每個 session 在記憶體裡最多保留的訊息數（預設 100，只是防記憶體爆掉的硬上限；送給模型多少歷史由下面的 token 預算決定）
+- `LLAMA_CONTEXT_MAX_TOKENS` / `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`：上下文上限與預留給輸出的 token（預設 `32768` / `4096`）。後端會讀推理服務 `/health` 回報的 `n_ctx`，實際上限取兩者較小值，所以通常不用手動對齊
 - `CONTEXT_STRATEGY`：上下文管理策略，支援 `compress`（預設）或 `window`
 - `CONTEXT_COMPRESS_THRESHOLD_RATIO`：預估上下文達到可用預算多少比例時觸發管理（預設 0.8）
 - `CONTEXT_COMPRESS_KEEP_RECENT_MESSAGES`：壓縮時保留最近幾則原文訊息
@@ -79,7 +79,13 @@ cp .env.example .env
 
 ## 上下文長度保護
 
-後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。預設上下文上限以 Ollama `gpt-oss:20b` 的 128K context window（`128 * 1024 = 131072` tokens）為基準，並透過 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS=4096` 預留輸出空間；超過門檻時可用兩種方案處理：
+後端在呼叫 LLM 前會先預估 `system + history + 當前 user` 的 token 數。上下文上限 = `min(LLAMA_CONTEXT_MAX_TOKENS, 推理服務回報的 n_ctx)`：
+
+- 推理服務的 `n_ctx` 在啟動預熱、每次 `/health`、以及對話時（尚未取得時每 30 秒、已取得時每 10 分鐘）更新
+- 後端 `/health` 會回 `context_max_tokens`，可以直接看目前實際用的上限
+- docker-compose 只要設一個 `LLAMA_N_CTX`（預設 32768），推理服務與後端都吃這個值
+
+再扣掉 `LLAMA_CONTEXT_RESERVED_OUTPUT_TOKENS`（最多扣一半）就是可用預算；超過門檻（預設 80%）時可用兩種方案處理：
 
 ### 方案 1：上下文壓縮（`CONTEXT_STRATEGY=compress`，預設）
 
@@ -105,11 +111,28 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 
 ---
 
+## FAQ 檢索（RAG）
+
+知識庫是 `app/data/rag_db.json`（`[{"question", "aliases", "answer"}]`），檔案改了會自動重新載入。
+
+- 比對：完全相同直接命中；否則把「請問、怎麼、可以」這類贅詞去掉，中文取雙字詞、英數取單字，
+  用 IDF 加權算相似度（0～1），達到 `RAG_MIN_SCORE`（預設 0.4）才附給模型。
+- 命中時，提示會請模型先判斷這筆 FAQ 是否真的回答了問題，不相關就不要硬套。
+- guardrail 判成 `PROMPT_ATTACK` / `SPAM` 的訊息一律拒答，不查 RAG。
+- 換 FAQ 或調門檻後跑 `python tools/eval_rag.py`（可加 `--min-score 0.5`）：
+  會列出換句話問法的命中率（`tools/rag_eval_queries.csv`，換 FAQ 時要一起換）與 hard_eval 199 句的誤命中。
+
+目前數字（舊做法「雙字詞重疊數 ≥ 3」→ 新做法）：換句話問法 31/37 → 37/37 命中正確；
+hard_eval 誤命中 52/199（含 13 句提示詞攻擊）→ 3/199（其中 2 句是同主題不同題目）。
+
+---
+
 ## API 與事件
 
 ### `GET /health`
 
-檢查 API 本身與 LLM 服務連線狀態。
+回 `status`（`ok` / `degraded`）、`llama`（推理服務：`connected` / `HTTP <code>` / `disconnected`）、
+`guardrail`（模型是否已載入）、`context_max_tokens`（目前實際使用的上下文上限）。
 
 ### `WS /ws/chat`
 
@@ -138,8 +161,9 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 - `{"type":"clear_history"}`
 - `{"type":"end_conversation"}`
 
-後端事件（客服模式）：
+後端事件（客服模式與 Agent 模式相同）：
 
+- `guardrail`（`label`、`degraded`；前端只用來更新狀態列）
 - `delta`
 - `done`
 - `error`
@@ -149,15 +173,12 @@ WebSocket payload 可選擇性帶入 `context_strategy` 覆蓋預設值，例如
 - `conversation_summary`
 - `conversation_ended`
 
-Agent 模式新增事件：
-
-- `agent_trace`（plan + tool_results）
-- `agent_final`
+Agent 模式的 plan 與工具結果只寫進後端 log，不送到前端。
 
 ---
 
 ## 開發提醒
 
-- 請先閱讀 `CODE_REVIEW_2026-04-28.md` 再進行重構。
+- 交接與目前狀態見倉庫根目錄 `HANDOFF.md`；舊的審查文件在 `docs/archive/`。
 - 若要延伸訊息協定，請同步更新前端 `Front/src/App.jsx` 的 payload handler。
-- 若要上線，建議加入：結構化 logging、速率限制、整合測試。
+- 測試：`pip install -r requirements.txt -r requirements-dev.txt && pytest -q tests/`（不需要真的模型或推理服務）。

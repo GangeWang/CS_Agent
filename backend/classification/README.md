@@ -228,6 +228,26 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 【消費】run_all_training.ps1 → 六種分類方式訓練腳本
 ```
 
+- **入庫的只有原始來源與翻譯結果**（2026-11-26 清理）：外部原始資料（HF parquet、`JailBreakV_28K.csv`、`sms-spam-collection.csv`）、
+  翻譯產物（`*_translated_zh.csv`，ollama 翻譯無法便宜重現）、`data_set/` 底下的檔案。
+  抽取與合併的中間檔中，`extracted_abusive.csv`（step01）、`extracted_spam.csv`（step03）、`merged_full_dataset.csv`（step07，只差換行符號）
+  重跑結果與歷史檔一致；**prompt attack 這條無法用目前的腳本重現**：照現在的 step02 會抽出 28,000 筆（含重複），
+  歷史的 `extracted_prompt_attack.csv` 卻是 5,168 筆不重複、其中 863 筆文字與現在的 `JailBreakV_28K.csv` 略有出入，
+  `deduped_prompt_attack.csv` 也有 206 筆不在那個歷史抽取檔裡，當時的實際做法沒有留下紀錄。
+  下游只用到 `prompt_attack_translated_zh.csv`（已入庫），所以不影響訓練；要重做翻譯時請從 git 歷史取回原檔，不要重跑 step02/04。
+  `deduped_full_dataset.csv` 與 `data_set/train_full_dataset.csv` 內容完全相同（md5 一致）。這些檔案和從沒被任何腳本用到的
+  `spml_prompt_injection.csv` 都已從目前版本移除，需要時可從 git 歷史取回：
+  `git checkout ba4c63a -- backend/classifcation/<檔名>`（那時目錄名還是拼錯的 `classifcation`，取回後搬到 `backend/classification/`）
+- 各外部來源一路保留了多少（2026-11-26 統計；v2 共 11,128 筆，其中外部翻譯來源 3,256 筆，其餘為 `ML_data.csv` 6,744 筆、人工樣本 1,128 筆）：
+
+  | 來源 | 原始檔 | 抽取 | 翻譯 | step08 去重後 | v2 最終 |
+  |---|---|---|---|---|---|
+  | HF parquet（維基討論頁留言） | 159,100 筆（有毒 9,602 / 無毒 149,498） | 有毒 9,433 | 9,433（692 筆翻譯失敗仍是英文） | 9,223 | ABUSIVE 2,500（下採樣上限） |
+  | `JailBreakV_28K.csv` | 28,000 筆（不重複 8,641） | 5,168 → step04 4,172 | 4,172（740 筆仍是英文） | 3,351 | PROMPT_ATTACK 196 |
+  | `sms-spam-collection.csv` | 5,572 筆（spam 747 / ham 4,825） | spam 747 | 747（32 筆仍是英文） | 592 | SPAM 560 |
+
+  入庫的原始檔沒有被截短：JailBreakV 28,000 筆、SMS 5,572 筆都是公開版的完整筆數；parquet 是某個 HF 資料集的 train 分片，上游筆數無法從這裡連線核對。無毒留言與 ham 簡訊從來沒用上。step09 移除的每一筆和原因都在 `data_set/removed_rows_v2.csv`。
+- 目錄原名 `classifcation`（拼錯），2026-11-26 改成 `classification`。
 - 歷史檔名對照：`full_data_set_fillted.csv`（filtered 錯字）= 現 `train_full_dataset.csv`；`FILLTTER/` = 現 `data_pipeline/`
 - 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
 - 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
@@ -241,7 +261,7 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 |---|---|---|
 | **ML**（TF-IDF + LR） | `ML/train_multiclass_ml.py` → `backend_ml_guardrail_model.joblib` | `ML/train_ovr_ml.py` → `ML/backend_ml_ovr_models/`（4 個 _bin.joblib） |
 | **BiLSTM**（字元級，packed） | `BILSTM/train_multiclass_bilstm.py` → `backend_ml_guardrail_bilstm_pytorch.pt` + vocab + label_encoder | `BILSTM/train_ovr_bilstm.py` → `BILSTM/backend_ml_ovr_bilstm_models/`（4 .pt + vocab） |
-| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer_legacy.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
+| **Transformer**（hfl/chinese-roberta-wwm-ext） | `transformer/train_multiclass_transformer.py` → `transformer/backend_ml_guardrail_transformer/` | `transformer/train_ovr_transformer.py` → `transformer/backend_ml_ovr_transformer_models_clean/` 🏆 **上線模型** |
 
 ### 訓練與評估（2026-11-26 起）
 

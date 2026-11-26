@@ -61,7 +61,7 @@ $training = @(
     "ML\train_ovr_ml.py",
     "BILSTM\train_multiclass_bilstm.py",
     "BILSTM\train_ovr_bilstm.py",
-    "transformer\train_multiclass_transformer_legacy.py",
+    "transformer\train_multiclass_transformer.py",
     "transformer\train_ovr_transformer.py"
 )
 foreach ($s in $training) { $results += Invoke-Step $s @($s) }

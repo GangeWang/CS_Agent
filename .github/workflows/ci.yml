@@ -1,0 +1,98 @@
+# CS_Agent CI：每次 push / PR 跑三個服務的測試。
+# 都不需要真的模型、GPU 或推理服務（測試用假的推理服務與極小的隨機模型），
+# 所以 checkout 不拉 LFS（guardrail 權重只是指標檔也沒關係）。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 後端（不含 torch）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # 與 backend/Dockerfile 相同
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: 安裝依賴（略過 torch / transformers，guardrail import 不需要它們）
+        run: |
+          grep -vE '^(torch|accelerate|transformers|sentence-transformers)==' requirements.txt > /tmp/requirements-light.txt
+          pip install -r /tmp/requirements-light.txt -r requirements-dev.txt
+      - name: pytest
+        run: python -m pytest -q tests/
+
+  backend-models:
+    name: 後端 guardrail 模型載入（CPU torch）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+      - name: 安裝依賴（CPU 版 torch，與 Dockerfile 相同做法）
+        run: |
+          pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+          grep -vE '^(torch|sentence-transformers)==' requirements.txt > /tmp/requirements-models.txt
+          pip install -r /tmp/requirements-models.txt -r requirements-dev.txt
+      - name: pytest（極小的隨機 BERT，不下載任何模型）
+        run: python -m pytest -q tests/test_guardrail_models.py
+
+  inference:
+    name: 推理服務（假的 llama_cpp）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: LLM_gen
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: LLM_gen/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: pytest
+        run: python -m pytest -q tests
+
+  frontend:
+    name: 前端
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Front
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Front/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

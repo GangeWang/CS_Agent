@@ -7,7 +7,7 @@
   data_set/removed_rows_v2.csv         被移除的每一筆 + 原因（供人工複查）
   data_set/hard_eval.csv               困難評估集（不進訓練，重訓後用來驗證誤判；199 句，見 curated_hard_eval.py）
 
-清理規則（2026-11-26 語料審查結論，見 classifcation/README.md「語料審查」）：
+清理規則（2026-11-26 語料審查結論，見 classification/README.md「語料審查」）：
   1) label 正規化：小寫 spam → SPAM（原本訓練腳本 isin(LABELS) 會整批丟掉 592 筆）
   2) 翻譯失敗殘留英文（拉丁字母 > 50%）→ 移除（step06 失敗時保留原文）
   3) 翻譯/模板殘留（"I will translate…"、"OpenAI 的內容政策…" 前綴）→ 移除
@@ -23,7 +23,7 @@
   7) 以正規化文字（去客套填充詞/標點）做近重複去重；同文不同標籤者全數移除
   8) 合併 curated_seed_data.py 的人工優質樣本（含 curated_seed_extra.py、curated_seed_long.py、curated_seed_targeted.py）；困難評估集與訓練集不得重疊
 
-用法（於 backend/classifcation/ 執行）：
+用法（於 backend/classification/ 執行）：
     python data_pipeline/step09_clean_dataset.py
 """
 from __future__ import annotations
