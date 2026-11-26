@@ -6,6 +6,12 @@ import rehypeKatex from 'rehype-katex'
 import rehypeSanitize from 'rehype-sanitize'
 import { defaultSchema } from 'hast-util-sanitize'
 import 'katex/dist/katex.min.css'
+import {
+    GUARDRAIL_STATUS_COPY,
+    INITIAL_GUARDRAIL_UI,
+    formatEmotionLevel,
+    getNextGuardrailUi,
+} from './guardrailUi'
 
 // 白名單式清理（rehype-sanitize）：在 KaTeX 之後執行，是唯一的 HTML 防線。
 // span/div 需放行 class 與 style：KaTeX 排版依賴 inline style（高度/垂直對齊/間距）。
@@ -21,12 +27,16 @@ const katexAllowed = {
 }
 
 // WS 位址：VITE_WS_URL 直接覆蓋 > VITE_WS_PORT 指定埠 > 同源（window.location.host）。
-// 同源預設讓容器化部署（nginx 反代 /ws/chat）與開發模式（vite proxy）都不用改碼。
+// 同源預設讓容器化部署（nginx 反代 /ws/chat）與開發模式（vite proxy）都不用改碼；
+// 只有前端和後端不在同一個 host、又沒有反代時才需要設定。
 const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws'
 const WS_URL = import.meta.env.VITE_WS_URL
     || (import.meta.env.VITE_WS_PORT
         ? `${wsProto}://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}/ws/chat`
         : `${wsProto}://${window.location.host}/ws/chat`)
+
+// 可選：送給後端的模型名稱。後端目前只接一個推理服務（不會轉送這個欄位），沒設定就不送。
+const MODEL_NAME = (import.meta.env.VITE_MODEL_NAME || '').trim()
 
 const THEMES = ['dark', 'light', 'pink', 'red', 'yellow', 'orange', 'brown', 'gray', 'blue', 'green', 'purple']
 const THEME_NAMES = {
@@ -43,54 +53,6 @@ const THEME_NAMES = {
     purple: '紫色'
 }
 
-
-const MAX_ABUSE_LEVEL = 5
-const GUARDRAIL_STATUS_COPY = {
-    default: { text: 'Guardrail：正常', icon: '✅' },
-    abuse: { text: 'Guardrail：偵測到不當語氣', icon: '🚨' },
-    warning: { text: 'Guardrail：偵測到高風險請求', icon: '⚠️' },
-}
-
-function normalizeGuardrailLabel(label) {
-    if (typeof label !== 'string') return 'normal'
-    const normalized = label.trim().toLowerCase().replace(/[\s-]+/g, '_')
-    if (normalized === 'abuse' || normalized === 'abusive') return 'abuse'
-    if (normalized === 'prompt_attack' || normalized === 'spam') return 'warning'
-    if (normalized === 'normal') return 'normal'
-    return 'normal'
-}
-
-function getNextGuardrailUi(prev, label) {
-    const normalizedLabel = normalizeGuardrailLabel(label)
-
-    if (normalizedLabel === 'abuse') {
-        return {
-            state: 'abuse',
-            abuseLevel: Math.min(MAX_ABUSE_LEVEL, prev.abuseLevel + 1),
-            label,
-        }
-    }
-
-    if (normalizedLabel === 'warning') {
-        return {
-            state: 'warning',
-            abuseLevel: prev.abuseLevel,
-            label,
-        }
-    }
-
-    const abuseLevel = Math.max(0, prev.abuseLevel - 1)
-    return {
-        state: abuseLevel > 0 ? 'abuse' : 'default',
-        abuseLevel,
-        label: 'normal',
-    }
-}
-
-function validatePhone(value) {
-    const digits = value.replace(/\D/g, '')
-    return digits.length >= 8 && digits.length <= 15
-}
 
 function MarkdownViewer({ source, isInitial = false }) {
     const [displayText, setDisplayText] = useState('')
@@ -187,9 +149,6 @@ export default function App() {
         { id: 1, role: 'assistant', text: '歡迎！請輸入你的問題。' }
     ])
     const [input, setInput] = useState('')
-    const [profileForm, setProfileForm] = useState({ name: '', phone: '' })
-    const [profileError, setProfileError] = useState('')
-    const [userProfile, setUserProfile] = useState(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isConversationEnded, setIsConversationEnded] = useState(false)
     const [isAgentMode, setIsAgentMode] = useState(false)
@@ -197,7 +156,7 @@ export default function App() {
     const [theme, setTheme] = useState(() => {
         return localStorage.getItem('chatTheme') || 'dark'
     })
-    const [guardrailUi, setGuardrailUi] = useState({ state: 'default', abuseLevel: 0, label: 'normal' })
+    const [guardrailUi, setGuardrailUi] = useState(INITIAL_GUARDRAIL_UI)
 
     // ===== Refs =====
     const panelRef = useRef(null)
@@ -413,25 +372,6 @@ export default function App() {
             return
         }
 
-        if (payload.type === 'agent_trace') {
-            console.debug('[agent] trace', payload)
-            return
-        }
-
-        if (payload.type === 'agent_final') {
-            const finalText = payload.text || ''
-            const aid = pendingAssistantId.current
-            if (aid) {
-                setMessages(prev => prev.map(m => m.id === aid ? { ...m, text: finalText } : m))
-            } else {
-                setMessages(prev => [...prev, { id: NEXT_ID(), role: 'assistant', text: finalText }])
-            }
-            pendingAssistantId.current = null
-            setIsLoading(false)
-            clearFlushTimer()
-            return
-        }
-
         if (payload.type === 'delta') {
             const delta = payload.text || ''
             bufferRef.current += delta
@@ -479,7 +419,6 @@ export default function App() {
 
     // ===== 發送訊息 =====
     async function sendMessage() {
-        if (!userProfile) return
         if (isConversationEnded) return
 
         const trimmed = input.trim()
@@ -505,11 +444,10 @@ export default function App() {
             }
 
             const ws = wsRef.current
-            // user_info（姓名/電話）不隨訊息送出：後端未使用，避免 PII 不必要傳輸（資料最小化）
             const payload = {
-                model: 'CS_AgentV12',
                 messages: [{ role: 'user', content: trimmed }],
-                mode: isAgentMode ? 'agent' : 'chat'
+                mode: isAgentMode ? 'agent' : 'chat',
+                ...(MODEL_NAME ? { model: MODEL_NAME } : {}),
             }
             ws.send(JSON.stringify(payload))
         } catch (err) {
@@ -546,8 +484,8 @@ export default function App() {
     }
 
     // ===== 生命週期 =====
+    // 開頁面就連線（不再先填姓名電話：後端沒有用到，也不該蒐集用不到的個資）
     useEffect(() => {
-        if (!userProfile) return
         connectWs(WS_URL)
 
         return () => {
@@ -563,76 +501,7 @@ export default function App() {
             stopHeartbeat()
             clearFlushTimer()
         }
-    }, [connectWs, userProfile])
-
-    // ===== Profile 提交 =====
-    function submitProfile(e) {
-        e.preventDefault()
-        const name = profileForm.name.trim()
-        const phone = profileForm.phone.trim()
-
-        if (!name || !phone) {
-            setProfileError('❌ 請輸入姓名與電話')
-            return
-        }
-
-        if (!validatePhone(phone)) {
-            setProfileError('❌ 請輸入有效電話號碼（8-15 位數字）')
-            return
-        }
-
-        setProfileError('')
-        setUserProfile({ name, phone })
-        setIsConversationEnded(false)
-        setGuardrailUi({ state: 'default', abuseLevel: 0, label: 'normal' })
-        // 保留原始歡迎訊息格式，加上使用者名稱
-        setMessages([{
-            id: NEXT_ID(),
-            role: 'assistant',
-            text: `🎉 歡迎 ${name}！請輸入你的問題。`
-        }])
-    }
-
-    // ===== 條件渲染：Profile 頁面 =====
-    if (!userProfile) {
-        return (
-            <div className="app profile-page">
-                <main className="profile-card">
-                    <h1>請先留資料以獲得完整的服務</h1>
-                    <form className="profile-form" onSubmit={submitProfile}>
-                        <label className="profile-field">
-                            <span>👤 姓名</span>
-                            <input
-                                type="text"
-                                value={profileForm.name}
-                                onChange={e => setProfileForm(prev => ({ ...prev, name: e.target.value }))}
-                                placeholder="請輸入您的姓名"
-                                maxLength={50}
-                                required
-                                aria-label="姓名輸入"
-                            />
-                        </label>
-                        <label className="profile-field">
-                            <span>📞 電話</span>
-                            <input
-                                type="tel"
-                                value={profileForm.phone}
-                                onChange={e => setProfileForm(prev => ({ ...prev, phone: e.target.value }))}
-                                placeholder="請輸入電話（8-15 位數字）"
-                                maxLength={20}
-                                required
-                                aria-label="電話輸入"
-                            />
-                        </label>
-                        {profileError && <div className="profile-error">{profileError}</div>}
-                        <button className="btn-send profile-submit" type="submit" aria-label="開始對話">
-                            ▶ 進入聊天
-                        </button>
-                    </form>
-                </main>
-            </div>
-        )
-    }
+    }, [connectWs])
 
     const guardrailStatus = GUARDRAIL_STATUS_COPY[guardrailUi.state] || GUARDRAIL_STATUS_COPY.default
 
@@ -654,7 +523,7 @@ export default function App() {
                         <span aria-hidden="true">{guardrailStatus.icon}</span>
                         <span>{guardrailStatus.text}</span>
                         {guardrailUi.abuseLevel > 0 && (
-                            <span className="guardrail-level">Level {guardrailUi.abuseLevel}/{MAX_ABUSE_LEVEL}</span>
+                            <span className="guardrail-level">{formatEmotionLevel(guardrailUi.abuseLevel)}</span>
                         )}
                     </div>
                     <label
