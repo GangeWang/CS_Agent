@@ -108,10 +108,16 @@ async def health():
     gr = guardrail_status()
     llama = await inference_info.probe(timeout=5.0)
     llama_ok = llama == "connected"
+    # 語意比對（guardrail 第三層）：模型已載入但這層被跳過時也要看得出來
+    if gr["semantic"] is None:
+        semantic = "unknown"
+    else:
+        semantic = "ok" if gr["semantic"] else "unavailable"
     return {
-        "status": "ok" if (llama_ok and gr["loaded"]) else "degraded",
+        "status": "ok" if (llama_ok and gr["loaded"] and semantic == "ok") else "degraded",
         "llama": llama,
         "guardrail": "ok" if gr["loaded"] else "degraded",
+        "guardrail_semantic": semantic,
         "context_max_tokens": effective_context_max_tokens(),
     }
 

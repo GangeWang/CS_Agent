@@ -553,3 +553,32 @@ def test_uncertain_instruction_is_guarded():
     assert "GuardrailLabel=UNCERTAIN" in text and "GuardrailLabel=NORMAL" not in text
     for must in ("系統設定", "其他人的個人資料", "自稱主管", "同理"):
         assert must in text
+
+
+def test_lfs_pointer_detected(guardrail, tmp_path):
+    """clone 時沒有 Git LFS：權重是指標檔，要給出明確的錯誤（提示 git lfs pull），不是 transformers 的怪錯誤。"""
+    ptr = tmp_path / "model.safetensors"
+    ptr.write_text("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 409100240\n")
+    real = tmp_path / "real.safetensors"
+    real.write_bytes(b"\x00" * 2048)
+    assert guardrail._is_lfs_pointer(ptr) is True
+    assert guardrail._is_lfs_pointer(real) is False
+    with pytest.raises(FileNotFoundError, match="git lfs pull"):
+        guardrail._check_not_lfs_pointers([real, ptr])
+
+
+def test_lfs_pointer_model_dir_degrades_with_clear_reason(guardrail, monkeypatch, tmp_path):
+    import json as _json
+
+    for lb in guardrail.LABELS:
+        d = tmp_path / lb.lower()
+        d.mkdir()
+        (d / "model.safetensors").write_text("version https://git-lfs.github.com/spec/v1\n")
+    (tmp_path / "ovr_config.json").write_text(_json.dumps({"thresholds": {}}), encoding="utf-8")
+    monkeypatch.setattr(guardrail, "MODEL_DIR", tmp_path)
+    monkeypatch.setattr(guardrail, "CONFIG_PATH", tmp_path / "ovr_config.json")
+    monkeypatch.setitem(guardrail._LOAD_FAILURE, "at", None)
+    guardrail._load_guardrail_resources.cache_clear()
+    r = guardrail.classify_text("您好")
+    guardrail._load_guardrail_resources.cache_clear()
+    assert r["available"] is False and "git lfs pull" in r["reason"]

@@ -160,6 +160,21 @@ def test_health_reports_inference_state_and_context(make_client):
     assert body["context_max_tokens"] == 8192
 
 
+def test_health_reports_semantic_stage(make_client, monkeypatch):
+    """guardrail 模型載入了、但語意比對被跳過（例如下載不到 embedding 模型）時，/health 要看得出來。"""
+    import app.main as main
+
+    def handler(request):
+        return httpx.Response(200, json={"status": "ok", "n_ctx": 8192})
+
+    client, _ = make_client(handler)
+    for semantic, expected, status in ((True, "ok", "ok"), (False, "unavailable", "degraded"), (None, "unknown", "degraded")):
+        monkeypatch.setattr(main, "guardrail_status", lambda s=semantic: {"loaded": True, "error": None, "semantic": s, "semantic_error": None})
+        with client:
+            body = client.get("/health").json()
+        assert body["guardrail_semantic"] == expected and body["status"] == status
+
+
 def test_health_reports_disconnected(make_client):
     def handler(request):
         raise httpx.ConnectError("refused")

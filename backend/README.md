@@ -132,7 +132,9 @@ hard_eval 誤命中 52/199（含 13 句提示詞攻擊）→ 3/199（其中 2 �
 ### `GET /health`
 
 回 `status`（`ok` / `degraded`）、`llama`（推理服務：`connected` / `HTTP <code>` / `disconnected`）、
-`guardrail`（模型是否已載入）、`context_max_tokens`（目前實際使用的上下文上限）。
+`guardrail`（模型是否已載入）、`guardrail_semantic`（語意比對這一層：`ok` / `unavailable`（缺檔或下載不到
+embedding 模型而跳過）/ `unknown`（還沒載入過））、`context_max_tokens`（目前實際使用的上下文上限）。
+三者都正常 `status` 才是 `ok`。模型檔是 Git LFS 指標檔（clone 時沒有 LFS）時，log 與降級原因會直接提示 `git lfs pull`。
 
 ### `WS /ws/chat`
 

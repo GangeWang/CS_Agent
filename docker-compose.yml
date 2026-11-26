@@ -34,6 +34,13 @@ services:
       - ${LLAMA_MODEL_FILE:-./models/CS_AgentV12.gguf}:/models/CS_AgentV12.gguf:ro
     ports:
       - "127.0.0.1:10000:10000"       # 僅綁本機；容器間走內部網路
+    # 模型載入成功才算 healthy（/health 在模型沒載入時回 503）；`docker compose ps` 看得到狀態
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:10000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     deploy:
       resources:
         reservations:
@@ -63,7 +70,16 @@ services:
       - hf-cache:/app/hf-cache
     ports:
       - "127.0.0.1:8000:8000"         # 僅綁本機供除錯；瀏覽器流量一律走 front 反代
+    # 後端要等 guardrail 模型預熱完才開始接連線（第一次啟動還要下載 embedding 模型）。
+    # /health 能回應 = 已可服務；degraded（例如推理服務還沒好）也算 healthy，細節看 /health 內容
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=8)"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     depends_on:
+      # 推理服務沒好時後端照樣能起來（會降級回錯誤，並每 30 秒重新確認），所以只等它啟動
       - inference
 
   front:
@@ -73,7 +89,9 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      # 後端預熱完才啟動前端：否則預熱期間 nginx 對 /ws/chat、/health 都回 502
+      backend:
+        condition: service_healthy
 
 volumes:
   hf-cache:

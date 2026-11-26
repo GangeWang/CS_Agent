@@ -47,7 +47,10 @@ def test_models_load_and_classify(tiny_models):
     r = g.classify_text("您好請問退款怎麼申請")
     assert r["available"] is True and r["stage"] in {"ML", "UNCERTAIN"}
     assert set(r["probs"]) == set(g.LABELS)
-    assert g.guardrail_status()["loaded"] is True
+    st = g.guardrail_status()
+    assert st["loaded"] is True
+    # 這個 fixture 沒有語意庫：要回報成「語意階段不可用」，/health 才看得出來
+    assert st["semantic"] is False and st["semantic_error"]
 
 
 def test_shared_tokenizer_matches_per_model_tokenize(tiny_models):

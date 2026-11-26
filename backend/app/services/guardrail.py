@@ -175,7 +175,7 @@ URL_REGEX = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 # Runtime state (for /health visibility)
 # =============================
 # 模型資源載入狀態：載入失敗時 /health 需能顯示 degraded，而非 silent fail-open。
-_GUARDRAIL_STATE = {"loaded": False, "error": None}
+_GUARDRAIL_STATE = {"loaded": False, "error": None, "semantic": None, "semantic_error": None}
 
 # 載入失敗後的冷卻時間：lru_cache 不快取例外，沒有冷卻的話模型壞掉時「每一則訊息」都會重新載入一次
 # （可能是好幾秒的磁碟 I/O），冷卻期間直接走降級（規則）流程。
@@ -185,7 +185,36 @@ _LOAD_FAILURE: Dict[str, Any] = {"at": None, "error": None}
 
 def guardrail_status() -> dict:
     """回報 guardrail 資源載入狀態（供 /health 使用，不觸發載入）。"""
-    return {"loaded": bool(_GUARDRAIL_STATE["loaded"]), "error": _GUARDRAIL_STATE["error"]}
+    return {
+        "loaded": bool(_GUARDRAIL_STATE["loaded"]),
+        "error": _GUARDRAIL_STATE["error"],
+        # 語意比對（第三層）：None = 還沒載入過；False = 模型已載入但語意階段缺檔或下載失敗而跳過
+        "semantic": _GUARDRAIL_STATE["semantic"],
+        "semantic_error": _GUARDRAIL_STATE["semantic_error"],
+    }
+
+
+_LFS_POINTER_PREFIX = b"version https://git-lfs"
+
+
+def _is_lfs_pointer(path: Path) -> bool:
+    """clone 時沒有 Git LFS，權重檔只會是幾百 bytes 的指標檔。"""
+    try:
+        if not path.is_file() or path.stat().st_size > 1024:
+            return False
+        with path.open("rb") as f:
+            return f.read(len(_LFS_POINTER_PREFIX)) == _LFS_POINTER_PREFIX
+    except OSError:
+        return False
+
+
+def _check_not_lfs_pointers(paths) -> None:
+    pointers = [str(p) for p in paths if _is_lfs_pointer(Path(p))]
+    if pointers:
+        raise FileNotFoundError(
+            "guardrail 檔案是 Git LFS 指標檔、不是真的模型（clone 時沒有 LFS）。"
+            "請在倉庫根目錄執行 `git lfs install && git lfs pull`。檔案：" + ", ".join(pointers)
+        )
 
 
 def _fail_closed_enabled() -> bool:
@@ -388,10 +417,15 @@ def _same_tokenizer(tokenizers: Dict[str, Any]) -> Any:
 # =============================
 @lru_cache(maxsize=1)
 def _load_guardrail_resources():
+    _log_resource_paths()
+    # 先檢查是不是 LFS 指標檔（不需要 transformers 就能給出明確的錯誤）
+    _check_not_lfs_pointers(
+        [p for lb in LABELS for p in sorted((MODEL_DIR / lb.lower()).glob("*.safetensors"))
+         + sorted((MODEL_DIR / lb.lower()).glob("*.bin"))]
+    )
+
     # 重量級套件在這裡才 import（見模組說明）
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
-    _log_resource_paths()
 
     # 1) OVR config
     cfg_path = Path(CONFIG_PATH)
@@ -431,8 +465,10 @@ def _load_guardrail_resources():
     corpus_texts: List[str] = []
     corpus_labels: List[str] = []
     corpus_emb: Optional[np.ndarray] = None
+    semantic_error: Optional[str] = None
     try:
         if SEMANTIC_TEXTS_PATH.exists() and SEMANTIC_LABELS_PATH.exists() and SEMANTIC_EMB_PATH.exists():
+            _check_not_lfs_pointers([SEMANTIC_TEXTS_PATH, SEMANTIC_LABELS_PATH, SEMANTIC_EMB_PATH])
             import joblib as _joblib  # local import to avoid heavy dependency if unused
             corpus_texts = _joblib.load(SEMANTIC_TEXTS_PATH)
             corpus_labels = _joblib.load(SEMANTIC_LABELS_PATH)
@@ -449,8 +485,11 @@ def _load_guardrail_resources():
             if len(corpus_texts) != int(corpus_emb.shape[0]):
                 raise ValueError("semantic corpus size and embedding rows mismatch")
         else:
+            semantic_error = "semantic files missing"
             logger.warning("Semantic resources missing, stage-2 will be skipped.")
     except Exception as e:
+        # 常見原因：第一次啟動連不到 HuggingFace，下載不到 embedding 模型（之後會存在 HF 快取）
+        semantic_error = f"{type(e).__name__}: {str(e)[:200]}"
         logger.warning(f"Semantic resources unavailable, stage-2 skipped: {e}")
         embedder = None
         corpus_texts = []
@@ -463,6 +502,8 @@ def _load_guardrail_resources():
 
     _GUARDRAIL_STATE["loaded"] = True
     _GUARDRAIL_STATE["error"] = None
+    _GUARDRAIL_STATE["semantic"] = embedder is not None
+    _GUARDRAIL_STATE["semantic_error"] = semantic_error
 
     return {
         "models": models,

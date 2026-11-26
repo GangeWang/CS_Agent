@@ -25,8 +25,13 @@ docker compose up -d --build
 
 # 確認
 docker compose ps
-curl http://localhost:8000/health        # {"status":"ok","llama":"connected"}
+curl http://localhost:8000/health        # {"status":"ok","llama":"connected","guardrail":"ok","guardrail_semantic":"ok",...}
 ```
+
+啟動順序：inference 與 backend 有 healthcheck；**front 會等 backend 預熱完（healthy）才啟動**，
+否則預熱期間 nginx 會對 `/ws/chat`、`/health` 回 502。第一次啟動 backend 要下載 embedding 模型，可能要等一兩分鐘，
+`docker compose ps` 會看到 `(health: starting)`。`/health` 的 `guardrail_semantic` 是 `unavailable` 代表下載失敗、
+guardrail 少了語意比對這一層（服務照常，但請確認機器能連 HuggingFace 後 `docker compose restart backend`）。
 
 ## 常用操作
 
@@ -68,6 +73,7 @@ docker compose -f docker-compose.yml -f docker/smoke/compose.smoke.yml down
 ```
 
 - 用 IP 或網域，不要用 localhost（localhost 在後端 Origin 白名單裡，測不出 nginx 有沒有保留埠號）。
-- 檢查項目：`/health` 為 ok、每句都有 guardrail 標籤、回覆逐段送出、回覆途中的 ping 有 pong、思考內容沒有外洩。
+- 加 `--strict` 時語意比對沒載入也算失敗（正式驗收用）；不加只警告（例如連不到 HuggingFace 的環境）。
+- 檢查項目：推理服務與 guardrail 正常、每句都有 guardrail 標籤、回覆逐段送出、回覆途中的 ping 有 pong、思考內容沒有外洩。
 - 假模型預設模仿 llama-cpp-python 不印特殊標記的輸出（`analysis…assistantfinal…`）；`FAKE_MODE=harmony` 改成帶 `<|channel|>` 標記的輸出。
 - 換成真的推理服務（不加 `-f docker/smoke/compose.smoke.yml`）也能跑 `ws_smoke.py`，可當上 GPU 後的驗收。
