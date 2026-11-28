@@ -25,6 +25,7 @@ from sklearn.model_selection import train_test_split
 ROOT = Path(__file__).resolve().parent  # backend/classification
 DATA_PATH = ROOT / "data_set" / "train_full_dataset_v2.csv"
 HARD_EVAL_PATH = ROOT / "data_set" / "hard_eval.csv"
+BLIND_EVAL_PATH = ROOT / "data_set" / "blind_eval.csv"  # 盲測集：決定上線模型用，不得照它的錯誤補樣本
 REPORT_DIR = ROOT / "reports"
 
 LABELS: List[str] = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
@@ -106,6 +107,20 @@ def load_hard_eval(path: Path = HARD_EVAL_PATH):
         return None, None
     d = pd.read_csv(path).dropna(subset=["text", "label"])
     return d["text"].astype(str).to_numpy(dtype=object), d["label"].astype(str).str.upper().to_numpy(dtype=object)
+
+
+def load_eval_sets() -> Dict[str, tuple]:
+    """訓練集以外的評估集：{"hard_eval": (X, y), "blind_eval": (X, y)}，檔案不存在的略過。
+
+    - hard_eval：困難樣本，已被拿來找弱點補樣本，比較像開發集。
+    - blind_eval：盲測集，用來比較 OvR / 4選1 決定上線模型。
+    """
+    out = {}
+    for name, path in (("hard_eval", HARD_EVAL_PATH), ("blind_eval", BLIND_EVAL_PATH)):
+        X, y = load_hard_eval(path)
+        if X is not None:
+            out[name] = (X, y)
+    return out
 
 
 def balanced_class_weights(y: Sequence[str], classes: Sequence[str]) -> np.ndarray:

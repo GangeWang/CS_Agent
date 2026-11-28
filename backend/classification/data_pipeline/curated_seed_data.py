@@ -241,3 +241,14 @@ SPAM = SPAM + _targeted.SPAM
 import curated_hard_eval as _hard_eval  # noqa: E402  困難評估集擴充（47 → 約 200 句）
 
 HARD_EVAL = HARD_EVAL + HARD_EVAL_EXTRA + _hard_eval.HARD_EVAL_V2
+
+import curated_seed_batch5 as _batch5  # noqa: E402  第五批：英文無髒話情緒、詢問 AI 客服本身、轉述可疑訊息查證
+
+NORMAL = NORMAL + _batch5.NORMAL
+ABUSIVE = ABUSIVE + _batch5.ABUSIVE
+PROMPT_ATTACK = PROMPT_ATTACK + _batch5.PROMPT_ATTACK
+SPAM = SPAM + _batch5.SPAM
+
+import curated_blind_eval as _blind  # noqa: E402  盲測集（不進訓練，不得照它的錯誤補樣本）
+
+BLIND_EVAL = _blind.BLIND_EVAL

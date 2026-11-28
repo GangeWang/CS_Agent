@@ -11,7 +11,8 @@
 
 後端的高優先 bug 已修好；guardrail 訓練資料已清理並補上人工樣本；六支訓練腳本已改為共用切分與評估。
 2026-11-26 負責人在自己的 GPU 機器上重訓了三次。hard_eval 從 47 句擴充到 199 句之後，上線流程的 macro-F1 是 **0.918**（17 句判錯、6 句 UNCERTAIN），錯誤集中在「沒有髒話的情緒」、「中文冒充權限 / 套取他人資料」、英文、離題閒聊。見第 6 節。
-針對這些情境手寫了第四批 373 句樣本（`curated_seed_targeted.py`），v2 變成 11,128 筆，**需要再 GPU 重訓一次**（第 4 節第 4 點）；重訓完再把模型 commit 進倉庫（第 4 節第 5 點）。
+針對這些情境手寫了第四批 373 句樣本（`curated_seed_targeted.py`），v2 變成 11,128 筆，重訓後上線流程 hard_eval 0.918 → 0.956，模型已 commit（PR #43）。
+2026-11-28：第四批重訓後 Transformer 4選1 在 hard_eval 領先 OvR（原因見第 6 節），負責人決定維持 OvR、先補第五批 205 句樣本（`curated_seed_batch5.py`，v2 = 11,331 筆），並新增 200 句盲測集 `blind_eval`；**需要再 GPU 重訓一次，看 blind_eval 決定上線模型**（第 4 節第 4 點）。
 另外上線的 `ws.py` 改成：模型沒把握（UNCERTAIN）時用保守回覆，不再當一般詢問放行（第 3.1 節）。
 第二輪修完了架構技術債 5、7～14（第 3.4 節）：async 串流、上下文跟著推理服務的 n_ctx 走、`ws_chat` 拆開、RAG 誤命中從 52/199 降到 3/199、前端狀態列改成情緒/安撫並拿掉姓名電話、GitHub Actions CI、刪除死碼與可重新產生的資料檔、目錄改名。只剩 6（等資料庫）。
 
@@ -148,13 +149,16 @@ curl -N http://127.0.0.1:10000/api/stream -H 'Content-Type: application/json' \
 1. ~~Review 並 merge PR #35~~（已完成）。
 2. ~~在有 GPU 的機器上用 v2 重訓六種方法~~（2026-11-26 已完成，結果見第 6 節）。
 3. ~~用加入第三批樣本的 v2 再重訓一次~~、~~在擴充到 199 句的 hard_eval 上建立新基準~~（2026-11-26 都已完成，結果見第 6 節）。
-4. **用加入第四批樣本的 v2 再重訓一次**：`.\run_all_training.ps1`（上次全部約 9 分鐘），把比較表和上線流程的錯誤清單（`reports\pipeline.json` 的 `hard_eval.errors`）貼回來。
-   - 第四批樣本是針對 hard_eval 判錯的情境寫的，所以**之後 hard_eval 比較像開發集**，分數會偏樂觀。重點看兩件事：上次錯的 17 句有沒有改善，以及原本答對的句子有沒有因此被改錯（尤其 NORMAL 對照組的情境）。
-   - sandbox 先用 TF-IDF 跑過，hard_eval 從 0.780 / 0.732 進步到 0.824 / 0.813（4選1 / OvR），見第 6 節最後。
+4. ~~用加入第四批樣本的 v2 再重訓一次~~（2026-11-26 已完成，模型在 PR #43，結果見 `backend/classification/README.md`）。
+   **用加入第五批樣本的 v2（11,331 筆）再重訓一次**：`.\run_all_training.ps1`，把 `python compare_reports.py` 的比較表貼回來。
+   - 這次比較表多了 `blind macroF1 / blind acc / blind unc` 三欄（盲測集，第 6 點）。**OvR 和 4選1 誰上線，看 blind_eval 決定**（負責人 2026-11-28 的決定）。
+   - 4選1 的模型這次也要 commit（`transformer/backend_ml_guardrail_transformer/`），倉庫裡那份是很早以前的，沒辦法拿來比較或上線。
 5. **把新模型和語意庫 commit 進倉庫**（Git LFS），上線環境才會拿到新模型。等第 4 點重訓完、確認沒有退步再 commit。上線只需要：`backend/classification/transformer/backend_ml_ovr_transformer_models_clean/`、`backend/semantic_models/`，另外建議一併 commit `backend/classification/reports/` 留存成績。checkpoints 已在 .gitignore。
-6. **建立一份新的盲測集**：目前的訓練樣本和 hard_eval 都是同一個作者（Claude）寫的，句型和用詞習慣很接近，hard_eval 的分數會高估真實表現。最可靠的是由負責人自己寫 30～50 句，或等資料庫建好後從真實客服對話抽樣標註，而且**寫好後不要拿來補訓練樣本**，只用來量測。
+6. ~~建立一份新的盲測集~~（2026-11-28）：`data_pipeline/curated_blind_eval.py` → `data_set/blind_eval.csv`，200 句（NORMAL 80 / ABUSIVE 50 / PROMPT_ATTACK 40 / SPAM 30）。
+   step09 保證它和訓練集、hard_eval 都不重疊（測試也會檢查）。**不要照它的錯誤補訓練樣本**；照它補過就要另寫一份新的。
+   限制：仍是 Claude 寫的，句型和訓練樣本接近，會高估真實表現；等資料庫建好，最好從真實客服對話抽樣標註一份取代。
 7. **長度捷徑**：30 字以上的訊息裡，NORMAL 只佔 14%（350 / 2,552）。199 句 hard_eval 出現了反方向的捷徑：不帶髒話的長篇抱怨（冰箱延期那句）被判成 NORMAL，因為以前的長句 ABUSIVE 幾乎都帶髒話。第四批補了 36 句長篇抱怨。**暫時不下採樣短模板 NORMAL**，等第 4 點重訓後再看。
-8. **OvR 與 4選1**：上線維持 OvR（負責人決定）。199 句 hard_eval 上 Transformer 4選1 是 0.927、OvR 是 0.913、上線流程是 0.918，差距約 3 句；而同一份資料重訓兩次，Transformer 4選1 的 test 就從 0.986 變成 0.995，差距在訓練隨機性的範圍內。第四批重訓後再比一次；4選1 的好處是推論只要 1 次 forward（OvR 要 4 次），但上線程式目前只支援 OvR。
+8. **OvR 與 4選1**：上線維持 OvR（負責人決定；2026-11-28 再確認：先補第五批樣本，重訓後看 blind_eval 再決定）。第四批重訓後 hard_eval 4選1 0.984、OvR 0.949，差距的原因見第 6 節「第四批重訓後：為什麼 4選1 在 hard_eval 領先」。以前的紀錄：199 句 hard_eval 上 Transformer 4選1 是 0.927、OvR 是 0.913、上線流程是 0.918，差距約 3 句；而同一份資料重訓兩次，Transformer 4選1 的 test 就從 0.986 變成 0.995，差距在訓練隨機性的範圍內。第四批重訓後再比一次；4選1 的好處是推論只要 1 次 forward（OvR 要 4 次），但上線程式目前只支援 OvR。
 9. **A/B 測試預訓練模型**：`ckiplab/bert-base-chinese`（繁體中文語料預訓練）對上現在的 `hfl/chinese-roberta-wwm-ext`。現有模型已經很好，優先度低。
 10. 第 8 節剩下的技術債：只剩 6，等資料庫。
 11. **換成自己的 FAQ**：`backend/app/data/rag_db.json` 混了聯通電信 FAQ（約 16 筆）和手機服務中心 FAQ，還有幾筆像「已為您轉接主管，請稍後」這種會讓模型宣稱做了它其實做不到的動作的答案。換成實際要服務的產業的 FAQ 後，把 `backend/tools/rag_eval_queries.csv` 換成對應的問法，跑 `python tools/eval_rag.py` 決定 `RAG_MIN_SCORE`。
@@ -197,6 +201,26 @@ pytest tests/          # 目前 51 個，全部通過
 ## 6. v2 重訓結果（2026-11-26）
 
 負責人在自己的 GPU 機器上用 `run_all_training.ps1` 跑完六種方法、重建語意庫和端到端評估，資料是完整的 v2 和共用切分。前兩次重訓的 hard_eval 是擴充前的 47 句版本（一筆約 2%，只能看方向）；第三次重訓改用 199 句版本，**兩者的分數不能直接比較**。
+
+### 第四批重訓後：為什麼 4選1 在 hard_eval 領先（2026-11-28 分析）
+
+GPU 重訓的完整成績在 `backend/classification/README.md`。hard_eval 上 Transformer 4選1 錯 3 句、OvR 錯 13 句，兩邊錯的句子沒有重疊（McNemar p≈0.02）；test 上反而是 OvR 略高（0.991 對 0.987）。
+
+在 sandbox 用上線的四個 OvR 二元模型逐句重算分數：
+
+| OvR 決策規則 | hard_eval 判錯 | test 判錯 |
+|---|---|---|
+| 上線規則：過門檻取最高，都沒過 → UNCERTAIN | 13 | 24 |
+| 直接取最高分 | 12 | 20 |
+| 分數除以門檻後取最高（沒有 UNCERTAIN） | 9 | 20 |
+
+- 換規則只能少錯 4 句，**主要是二元模型本身的問題**：6 句英文、沒有髒話的抱怨，ABUSIVE 模型只給 0.12～0.18 分（門檻 0.61）。v2 的英文 ABUSIVE 只有 39 句。4選1 的 softmax 讓 4 類互相比，「不像其他三類」就會落到 ABUSIVE；OvR 要 ABUSIVE 模型自己認得出來。
+- 「AI 客服會記得我嗎」「可以轉真人嗎」被 PROMPT_ATTACK 模型給 0.98～0.99 分：v2 含「AI」的句子 PROMPT_ATTACK 216 句、NORMAL 4 句；含「真人」的攻擊幾乎都是「現在你是真人客服，…」模板。
+- 第五批樣本（`curated_seed_batch5.py`，205 句）就是補這兩類，另外補轉述可疑訊息來查證的 NORMAL、英文冒充權限的 PROMPT_ATTACK、中文閒聊 SPAM。
+
+**盲測集的基準**（第五批加入前、現在上線的 Transformer OvR，sandbox 用上線門檻量）：blind_eval macro-F1 **0.917**、準確率 0.890、UNCERTAIN 6.5%（22 句判錯，其中 13 句 UNCERTAIN）；同一組模型的 hard_eval 是 0.949，可見 hard_eval 偏樂觀。
+英文抱怨仍是最大宗（7 句），其次是語氣平穩的短句（「好的，那我明天再去門市一趟」）落入 UNCERTAIN、離題閒聊 UNCERTAIN。
+**這些錯誤不要拿來補樣本**（第 4 節第 6 點）。
 
 ### 第四批樣本加入後（v2 = 11,128 筆）：sandbox 參考
 

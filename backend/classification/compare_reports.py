@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""把 reports/*.json 並排成一張表，比較六種方法（與上線流程）在同一份 test / hard_eval 上的表現。
+"""把 reports/*.json 並排成一張表，比較六種方法（與上線流程）在同一份 test / hard_eval / blind_eval 上的表現。
+
+決定上線模型時看 blind_eval：hard_eval 已經被拿來補樣本，分數偏樂觀。
 
     python backend/classification/compare_reports.py
 
@@ -28,7 +30,7 @@ def main() -> None:
         p = C.REPORT_DIR / f"{name}.json"
         r = json.loads(p.read_text(encoding="utf-8"))
         cells = [name]
-        for split in ("test", "hard_eval"):
+        for split in ("test", "hard_eval", "blind_eval"):
             m = r.get(split)
             cells += ([f"{m['macro_f1']:.4f}", f"{m['accuracy']:.4f}", f"{m['uncertain_rate']:.2%}"]
                       if m else ["-", "-", "-"])
@@ -36,7 +38,8 @@ def main() -> None:
     if not rows:
         print(f"no reports under {C.REPORT_DIR}; run the training scripts first")
         return
-    header = ["method", "test macroF1", "test acc", "test unc", "hard macroF1", "hard acc", "hard unc"]
+    header = ["method", "test macroF1", "test acc", "test unc", "hard macroF1", "hard acc", "hard unc",
+              "blind macroF1", "blind acc", "blind unc"]
     widths = [max(len(str(x)) for x in col) for col in zip(header, *rows)]
     for line in [header, ["-" * w for w in widths], *rows]:
         print("  ".join(str(x).ljust(w) for x, w in zip(line, widths)))

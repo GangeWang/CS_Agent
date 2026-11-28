@@ -6,6 +6,7 @@
   data_set/train_full_dataset_v2.csv   清理後訓練集（訓練腳本 DATA_PATH 指向此檔）
   data_set/removed_rows_v2.csv         被移除的每一筆 + 原因（供人工複查）
   data_set/hard_eval.csv               困難評估集（不進訓練，重訓後用來驗證誤判；199 句，見 curated_hard_eval.py）
+  data_set/blind_eval.csv              盲測集（不進訓練，用來決定上線模型；200 句，見 curated_blind_eval.py，不得照它的錯誤補樣本）
 
 清理規則（2026-11-26 語料審查結論，見 classification/README.md「語料審查」）：
   1) label 正規化：小寫 spam → SPAM（原本訓練腳本 isin(LABELS) 會整批丟掉 592 筆）
@@ -21,7 +22,7 @@
      - 其餘下採樣至 JIGSAW_ABUSIVE_CAP，避免 ABUSIVE 壓倒 NORMAL（原 10,268 vs 5,917）
   6) SPAM：被模板誤組的「合法通知」（若非本人請忽略 / 請備份資料…）→ 移除；> 200 字 → 移除
   7) 以正規化文字（去客套填充詞/標點）做近重複去重；同文不同標籤者全數移除
-  8) 合併 curated_seed_data.py 的人工優質樣本（含 curated_seed_extra.py、curated_seed_long.py、curated_seed_targeted.py）；困難評估集與訓練集不得重疊
+  8) 合併 curated_seed_data.py 的人工優質樣本（含 curated_seed_extra.py、curated_seed_long.py、curated_seed_targeted.py、curated_seed_batch5.py）；兩份評估集與訓練集不得重疊
 
 用法（於 backend/classification/ 執行）：
     python data_pipeline/step09_clean_dataset.py
@@ -46,6 +47,7 @@ ML_DATA = ROOT / "data_set" / "ML_data.csv"  # 本地中文客服語境來源（
 OUT_TRAIN = ROOT / "data_set" / "train_full_dataset_v2.csv"
 OUT_REMOVED = ROOT / "data_set" / "removed_rows_v2.csv"
 OUT_EVAL = ROOT / "data_set" / "hard_eval.csv"
+OUT_BLIND = ROOT / "data_set" / "blind_eval.csv"
 
 LABELS = ["NORMAL", "ABUSIVE", "PROMPT_ATTACK", "SPAM"]
 JIGSAW_ABUSIVE_CAP = 2500
@@ -148,19 +150,21 @@ def main() -> None:
     removed.append(d)
     kept = kept[~dup_mask]
 
-    # 評估集不得出現在訓練集
+    # 評估集（hard_eval、blind_eval）不得出現在訓練集
     eval_df = pd.DataFrame(seeds.HARD_EVAL, columns=["text", "label"])
-    eval_keys = set(eval_df["text"].map(norm_key))
-    leak = kept["key"].isin(eval_keys)
-    d = kept[leak].copy()
-    d["reason"] = "overlaps_hard_eval"
-    removed.append(d)
-    kept = kept[~leak]
+    blind_df = pd.DataFrame(seeds.BLIND_EVAL, columns=["text", "label"])
+    for name, edf in (("hard_eval", eval_df), ("blind_eval", blind_df)):
+        leak = kept["key"].isin(set(edf["text"].map(norm_key)))
+        d = kept[leak].copy()
+        d["reason"] = f"overlaps_{name}"
+        removed.append(d)
+        kept = kept[~leak]
 
     kept[["text", "label"]].sample(frac=1, random_state=SEED).to_csv(OUT_TRAIN, index=False, encoding="utf-8-sig")
     rm = pd.concat(removed, ignore_index=True)[["text", "label", "reason"]]
     rm.to_csv(OUT_REMOVED, index=False, encoding="utf-8-sig")
     eval_df.to_csv(OUT_EVAL, index=False, encoding="utf-8-sig")
+    blind_df.to_csv(OUT_BLIND, index=False, encoding="utf-8-sig")
 
     print(f"input rows: {n_in}")
     print(f"removed:    {len(rm)}")
@@ -169,6 +173,7 @@ def main() -> None:
     print(f"output:     {len(kept)}")
     print(kept["label"].value_counts().to_string())
     print(f"hard eval:  {len(eval_df)}")
+    print(f"blind eval: {len(blind_df)}")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@
 #
 # 用法（Windows PowerShell 5.1 或 PowerShell 7）：
 #   .\run_all_training.ps1               # 全部
-#   .\run_all_training.ps1 -SkipTest     # 端到端評估只跑 hard_eval（較快）
+#   .\run_all_training.ps1 -SkipTest     # 端到端評估只跑 hard_eval 與 blind_eval（較快）
 #
 # 2026-11-26 修正：
 # - stderr 轉成一般文字：PowerShell 5.1 會把 python 的 stderr（警告、進度條）包成紅字 NativeCommandError，

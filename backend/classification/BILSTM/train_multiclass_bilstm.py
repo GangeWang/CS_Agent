@@ -46,7 +46,7 @@ def main() -> None:
 
     df = C.load_dataset()
     s = C.split_dataset(df)
-    X_hard, y_hard = C.load_hard_eval()
+    evals = C.load_eval_sets()  # hard_eval + blind_eval
 
     le = LabelEncoder().fit(C.LABELS)
     vocab = B.build_vocab(s.X_train, MAX_VOCAB_SIZE)  # 只用 train 建 vocab
@@ -73,8 +73,8 @@ def main() -> None:
 
     results = {"method": METHOD,
                "test": C.evaluate_split(s.X_test, s.y_test, predict(s.X_test), f"{METHOD} / test")}
-    if X_hard is not None:
-        results["hard_eval"] = C.evaluate_split(X_hard, y_hard, predict(X_hard), f"{METHOD} / hard_eval")
+    for name, (X_e, y_e) in evals.items():
+        results[name] = C.evaluate_split(X_e, y_e, predict(X_e), f"{METHOD} / {name}")
 
     joblib.dump(vocab, VOCAB_PATH)
     joblib.dump(le, LABEL_ENCODER_PATH)

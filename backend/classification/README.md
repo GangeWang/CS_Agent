@@ -2,6 +2,8 @@
 
 > 最新結果：2026-11-26 第四批樣本重訓（v2 = 11,128 筆，負責人 GPU 機器跑 `run_all_training.ps1`）。數字取自 `reports/*.json`，重跑後可用 `python compare_reports.py` 重新產生比較表。
 > test = 共用切分的 20%（2,226 筆，seed 42，近重複已去除）；hard_eval = `data_set/hard_eval.csv` 199 句困難樣本（不進訓練）。
+> **2026-11-28 新增盲測集** `data_set/blind_eval.csv`（200 句，`data_pipeline/curated_blind_eval.py`，不進訓練、不得照它的錯誤補樣本）：hard_eval 已被拿來補樣本、偏樂觀，**決定上線模型（OvR / 4選1）看 blind_eval**。下次重訓後 `compare_reports.py` 會多出 blind 三欄。
+> 現在上線的 Transformer OvR 在 blind_eval 上是 macro-F1 0.917、準確率 0.890、UNCERTAIN 6.5%（sandbox 量，第五批樣本加入前；hard_eval 同模型 0.949）。第五批樣本（`curated_seed_batch5.py`，205 句）已加入 v2（11,331 筆），等重訓。
 > OvR 的 test / hard_eval 都是以上線決策規則（過門檻取最高、都沒過 → UNCERTAIN）組合成 4 類後的結果，可與 4選1 直接比較。
 > 舊版（v1 資料、1,138 筆 test、未去近重複）的 99～100% 分數偏樂觀且不能與這裡比較，已移除；需要時用 `git show 117b544:backend/classification/README.md` 查看。
 

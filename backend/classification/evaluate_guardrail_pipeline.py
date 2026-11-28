@@ -5,7 +5,8 @@
 （規則、門檻、決策邏輯、語意庫全部包含在內），而不是單一模型的分數。
 
 評估集：
-- hard_eval.csv（困難樣本，不進訓練）← 最重要
+- blind_eval.csv（盲測集，不進訓練）← 決定上線模型用，最重要
+- hard_eval.csv（困難樣本，不進訓練；已照它補過樣本，比較像開發集）
 - 共用切分的 test（common.split_dataset）；注意若上線模型不是用 v2 + 本切分訓練的，test 可能與其訓練資料重疊
 
 用法（於任意目錄執行，需 torch / transformers / sentence-transformers 與 LFS 模型檔）：
@@ -57,13 +58,12 @@ def run(texts, y_true, title):
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--skip-test", action="store_true", help="只跑 hard_eval（較快）")
+    ap.add_argument("--skip-test", action="store_true", help="只跑 hard_eval 與 blind_eval（較快）")
     args = ap.parse_args()
 
     results = {"method": "pipeline"}
-    X_hard, y_hard = C.load_hard_eval()
-    if X_hard is not None:
-        results["hard_eval"] = run(X_hard, y_hard, "pipeline / hard_eval")
+    for name, (X_e, y_e) in C.load_eval_sets().items():
+        results[name] = run(X_e, y_e, f"pipeline / {name}")
     if not args.skip_test:
         s = C.split_dataset(C.load_dataset())
         results["test"] = run(s.X_test, s.y_test, "pipeline / test")
