@@ -1,209 +1,420 @@
 # Guardrail 模型結果整理
 
+> 最新結果：2026-11-26 第四批樣本重訓（v2 = 11,128 筆，負責人 GPU 機器跑 `run_all_training.ps1`）。數字取自 `reports/*.json`，重跑後可用 `python compare_reports.py` 重新產生比較表。
+> test = 共用切分的 20%（2,226 筆，seed 42，近重複已去除）；hard_eval = `data_set/hard_eval.csv` 199 句困難樣本（不進訓練）。
+> OvR 的 test / hard_eval 都是以上線決策規則（過門檻取最高、都沒過 → UNCERTAIN）組合成 4 類後的結果，可與 4選1 直接比較。
+> 舊版（v1 資料、1,138 筆 test、未去近重複）的 99～100% 分數偏樂觀且不能與這裡比較，已移除；需要時用 `git show 117b544:backend/classification/README.md` 查看。
 
+## 總覽
 
-## BiLSTM（多類）
+| 方法 | test macro-F1 | test 準確率 | test UNCERTAIN | hard_eval macro-F1 | hard_eval 準確率 | hard_eval 判錯 | hard_eval UNCERTAIN |
+|---|---|---|---|---|---|---|---|
+| TF-IDF + LR 4選1 | 0.953 | 0.969 | — | 0.821 | 0.829 | 34 / 199 | — |
+| TF-IDF + LR OvR | 0.942 | 0.960 | 0.7% | 0.815 | 0.804 | 39 / 199 | 7.0% |
+| BiLSTM 4選1 | 0.942 | 0.964 | — | 0.835 | 0.844 | 31 / 199 | — |
+| BiLSTM OvR | 0.938 | 0.953 | 2.9% | 0.741 | 0.729 | 54 / 199 | 15.6% |
+| Transformer 4選1 | 0.987 | 0.992 | — | 0.984 | 0.985 | 3 / 199 | — |
+| Transformer OvR（上線模型） | 0.991 | 0.989 | 0.4% | 0.949 | 0.935 | 13 / 199 | 2.5% |
+| **上線流程**（規則 → Transformer OvR → 語意比對） | 0.992 | 0.992 | 0.1% | 0.956 | 0.950 | 10 / 199 | 1.0% |
+
+重點：
+
+- **上線流程 hard_eval macro-F1 0.918 → 0.956**（判錯 17 → 10 句，含 2 句 UNCERTAIN），test 0.994 → 0.992。
+- 第四批樣本是針對 hard_eval 判錯的情境寫的，hard_eval 現在比較像開發集，分數偏樂觀；要量真實表現需要另一份沒拿來補樣本的盲測集。
+- test 分數比第三次重訓略降不是退步：共用切分把部分第四批樣本分進 test，這些句子比模板句難。
+- Transformer 4選1 在 hard_eval 上（0.984）高於 OvR（0.949），上線依負責人決定維持 OvR。
+- 上線流程仍判錯的 10 句：英文無髒話的情緒抱怨 4 句被判 NORMAL；NORMAL 被誤判 4 句（問 AI 能不能記得對話、要求轉真人 → PROMPT_ATTACK；轉貼 LINE 假業務、家人收到中獎簡訊來確認 → PROMPT_ATTACK / SPAM）；英文冒充管理員要折扣碼、離題閒聊天氣各 1 句落入 UNCERTAIN。完整清單在 `reports/pipeline.json` 的 `hard_eval.errors`。
+
+### OvR 門檻（在 val 上選出）
+
+| 方法 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM |
+|---|---|---|---|---|
+| TF-IDF + LR OvR | 0.25 | 0.59 | 0.74 | 0.47 |
+| BiLSTM OvR | 0.48 | 0.41 | 0.93 | 0.87 |
+| Transformer OvR（上線模型） | 0.23 | 0.61 | 0.41 | 0.95 |
+
+上線流程使用 Transformer OvR 的門檻。
+
+---
+
+## TF-IDF + LR 4選1
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9938 | 0.9748 | 0.9842 | 992 |
+| ABUSIVE | 0.9551 | 0.9841 | 0.9694 | 756 |
+| PROMPT_ATTACK | 0.9006 | 0.8851 | 0.8928 | 174 |
+| SPAM | 0.9670 | 0.9638 | 0.9654 | 304 |
+| **macro avg** | 0.9541 | 0.9519 | **0.9529** | 2226 |
+
+準確率 0.9695
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 1.0000 | 0.7595 | 0.8633 | 79 |
+| ABUSIVE | 0.7541 | 0.9200 | 0.8288 | 50 |
+| PROMPT_ATTACK | 0.7727 | 0.8500 | 0.8095 | 40 |
+| SPAM | 0.7353 | 0.8333 | 0.7812 | 30 |
+| **macro avg** | 0.8155 | 0.8407 | **0.8207** | 199 |
+
+準確率 0.8291
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 60 | 6 | 6 | 7 | 0 |
+| ABUSIVE | 0 | 46 | 3 | 1 | 0 |
+| PROMPT_ATTACK | 0 | 5 | 34 | 1 | 0 |
+| SPAM | 0 | 4 | 1 | 25 | 0 |
+
+---
+
+## TF-IDF + LR OvR
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9721 | 0.9849 | 0.9785 | 992 |
+| ABUSIVE | 0.9609 | 0.9749 | 0.9678 | 756 |
+| PROMPT_ATTACK | 0.9854 | 0.7759 | 0.8682 | 174 |
+| SPAM | 0.9601 | 0.9507 | 0.9554 | 304 |
+| **macro avg** | 0.9696 | 0.9216 | **0.9425** | 2226 |
+
+準確率 0.9605，UNCERTAIN 0.7%
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9429 | 0.8354 | 0.8859 | 79 |
+| ABUSIVE | 0.7895 | 0.9000 | 0.8411 | 50 |
+| PROMPT_ATTACK | 0.9615 | 0.6250 | 0.7576 | 40 |
+| SPAM | 0.7500 | 0.8000 | 0.7742 | 30 |
+| **macro avg** | 0.8610 | 0.7901 | **0.8147** | 199 |
+
+準確率 0.8040，UNCERTAIN 7.0%
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 66 | 3 | 1 | 4 | 5 |
+| ABUSIVE | 0 | 45 | 0 | 2 | 3 |
+| PROMPT_ATTACK | 3 | 6 | 25 | 2 | 4 |
+| SPAM | 1 | 3 | 0 | 24 | 2 |
+
+### 各二元分類器（test）
 
 ```text
-=== Classification Report ===
-               precision    recall  f1-score   support
+[NORMAL] threshold = 0.25
+              precision    recall  f1-score   support
 
-      ABUSIVE     0.9091    0.9091    0.9091        33
-       NORMAL     0.9961    0.9971    0.9966      1028
-PROMPT_ATTACK     0.9565    0.8800    0.9167        25
-         SPAM     0.9434    0.9615    0.9524        52
+           0     0.9941    0.9595    0.9765      1234
+           1     0.9517    0.9929    0.9719       992
 
-     accuracy                         0.9903      1138
-    macro avg     0.9513    0.9369    0.9437      1138
- weighted avg     0.9903    0.9903    0.9903      1138
+    accuracy                         0.9744      2226
+   macro avg     0.9729    0.9762    0.9742      2226
+weighted avg     0.9752    0.9744    0.9744      2226
+
+[ABUSIVE] threshold = 0.59
+              precision    recall  f1-score   support
+
+           0     0.9870    0.9796    0.9833      1470
+           1     0.9609    0.9749    0.9678       756
+
+    accuracy                         0.9780      2226
+   macro avg     0.9739    0.9772    0.9755      2226
+weighted avg     0.9781    0.9780    0.9780      2226
+
+[PROMPT_ATTACK] threshold = 0.74
+              precision    recall  f1-score   support
+
+           0     0.9818    0.9990    0.9903      2052
+           1     0.9855    0.7816    0.8718       174
+
+    accuracy                         0.9820      2226
+   macro avg     0.9837    0.8903    0.9311      2226
+weighted avg     0.9821    0.9820    0.9811      2226
+
+[SPAM] threshold = 0.47
+              precision    recall  f1-score   support
+
+           0     0.9927    0.9912    0.9919      1922
+           1     0.9446    0.9539    0.9493       304
+
+    accuracy                         0.9861      2226
+   macro avg     0.9687    0.9726    0.9706      2226
+weighted avg     0.9861    0.9861    0.9861      2226
 ```
 
 ---
+
+## BiLSTM 4選1
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9868 | 0.9798 | 0.9833 | 992 |
+| ABUSIVE | 0.9797 | 0.9590 | 0.9693 | 756 |
+| PROMPT_ATTACK | 0.8556 | 0.8851 | 0.8701 | 174 |
+| SPAM | 0.9190 | 0.9704 | 0.9440 | 304 |
+| **macro avg** | 0.9353 | 0.9486 | **0.9417** | 2226 |
+
+準確率 0.9641
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9189 | 0.8608 | 0.8889 | 79 |
+| ABUSIVE | 0.8409 | 0.7400 | 0.7872 | 50 |
+| PROMPT_ATTACK | 0.7872 | 0.9250 | 0.8506 | 40 |
+| SPAM | 0.7647 | 0.8667 | 0.8125 | 30 |
+| **macro avg** | 0.8279 | 0.8481 | **0.8348** | 199 |
+
+準確率 0.8442
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 68 | 3 | 3 | 5 | 0 |
+| ABUSIVE | 4 | 37 | 6 | 3 | 0 |
+| PROMPT_ATTACK | 2 | 1 | 37 | 0 | 0 |
+| SPAM | 0 | 3 | 1 | 26 | 0 |
+
+---
+
 ## BiLSTM OvR
 
-```text
-Training binary model: NORMAL vs NOT_NORMAL
-[NORMAL] threshold(from val) = 0.64
-              precision    recall  f1-score   support
+### test（2,226 筆）
 
-           0     0.9727    0.9727    0.9727       110
-           1     0.9971    0.9971    0.9971      1028
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9929 | 0.9819 | 0.9873 | 992 |
+| ABUSIVE | 0.9723 | 0.9749 | 0.9736 | 756 |
+| PROMPT_ATTACK | 0.9632 | 0.7529 | 0.8452 | 174 |
+| SPAM | 0.9721 | 0.9178 | 0.9442 | 304 |
+| **macro avg** | 0.9751 | 0.9068 | **0.9376** | 2226 |
 
-    accuracy                         0.9947      1138
-   macro avg     0.9849    0.9849    0.9849      1138
-weighted avg     0.9947    0.9947    0.9947      1138
+準確率 0.9528，UNCERTAIN 2.9%
 
-Training binary model: ABUSIVE vs NOT_ABUSIVE
-[ABUSIVE] threshold(from val) = 0.3
-              precision    recall  f1-score   support
+### hard_eval（199 句）
 
-           0     0.9982    0.9991    0.9986      1105
-           1     0.9688    0.9394    0.9538        33
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9718 | 0.8734 | 0.9200 | 79 |
+| ABUSIVE | 0.7321 | 0.8200 | 0.7736 | 50 |
+| PROMPT_ATTACK | 0.8235 | 0.3500 | 0.4912 | 40 |
+| SPAM | 0.8750 | 0.7000 | 0.7778 | 30 |
+| **macro avg** | 0.8506 | 0.6859 | **0.7406** | 199 |
 
-    accuracy                         0.9974      1138
-   macro avg     0.9835    0.9692    0.9762      1138
-weighted avg     0.9973    0.9974    0.9973      1138
+準確率 0.7286，UNCERTAIN 15.6%
 
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 69 | 4 | 0 | 2 | 4 |
+| ABUSIVE | 2 | 41 | 2 | 0 | 5 |
+| PROMPT_ATTACK | 0 | 7 | 14 | 1 | 18 |
+| SPAM | 0 | 4 | 1 | 21 | 4 |
 
-Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
-[PROMPT_ATTACK] threshold(from val) = 0.48
-              precision    recall  f1-score   support
-
-           0     1.0000    0.9991    0.9996      1113
-           1     0.9615    1.0000    0.9804        25
-
-    accuracy                         0.9991      1138
-   macro avg     0.9808    0.9996    0.9900      1138
-weighted avg     0.9992    0.9991    0.9991      1138
-
-
-Training binary model: SPAM vs NOT_SPAM
-[SPAM] threshold(from val) = 0.3
-              precision    recall  f1-score   support
-
-           0     0.9972    0.9991    0.9982      1086
-           1     0.9800    0.9423    0.9608        52
-
-    accuracy                         0.9965      1138
-   macro avg     0.9886    0.9707    0.9795      1138
-weighted avg     0.9965    0.9965    0.9965      1138
-```
-
----
-## TF-IDF + LR（多類）
+### 各二元分類器（test）
 
 ```text
-=== Classification Report ===
-               precision    recall  f1-score   support
-
-      ABUSIVE     0.8889    0.9697    0.9275        33
-       NORMAL     0.9990    0.9961    0.9976      1028
-PROMPT_ATTACK     0.9615    1.0000    0.9804        25
-         SPAM     0.9804    0.9615    0.9709        52
-
-     accuracy                         0.9938      1138
-    macro avg     0.9575    0.9818    0.9691      1138
- weighted avg     0.9942    0.9938    0.9939      1138
-```
-
----
-
-## TF-IDF + LR（OvR）
-
-```text
-Training binary model: NORMAL vs NOT_NORMAL
-[NORMAL] best threshold = 0.32
+[NORMAL] threshold = 0.48
               precision    recall  f1-score   support
 
-           0     0.9818    0.9818    0.9818       110
-           1     0.9981    0.9981    0.9981      1028
+           0     0.9878    0.9878    0.9878      1234
+           1     0.9849    0.9849    0.9849       992
 
-    accuracy                         0.9965      1138
-   macro avg     0.9899    0.9899    0.9899      1138
-weighted avg     0.9965    0.9965    0.9965      1138
+    accuracy                         0.9865      2226
+   macro avg     0.9864    0.9864    0.9864      2226
+weighted avg     0.9865    0.9865    0.9865      2226
 
-Training binary model: ABUSIVE vs NOT_ABUSIVE
-[ABUSIVE] best threshold = 0.82
+[ABUSIVE] threshold = 0.41
               precision    recall  f1-score   support
 
-           0     0.9973    0.9991    0.9982      1105
-           1     0.9677    0.9091    0.9375        33
+           0     0.9890    0.9810    0.9850      1470
+           1     0.9635    0.9788    0.9711       756
 
-    accuracy                         0.9965      1138
-   macro avg     0.9825    0.9541    0.9678      1138
-weighted avg     0.9964    0.9965    0.9964      1138
+    accuracy                         0.9802      2226
+   macro avg     0.9763    0.9799    0.9781      2226
+weighted avg     0.9804    0.9802    0.9803      2226
 
-Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
-[PROMPT_ATTACK] best threshold = 0.66
+[PROMPT_ATTACK] threshold = 0.93
               precision    recall  f1-score   support
 
-           0     0.9991    1.0000    0.9996      1113
-           1     1.0000    0.9600    0.9796        25
+           0     0.9794    0.9966    0.9879      2052
+           1     0.9493    0.7529    0.8397       174
 
-    accuracy                         0.9991      1138
-   macro avg     0.9996    0.9800    0.9896      1138
-weighted avg     0.9991    0.9991    0.9991      1138
+    accuracy                         0.9775      2226
+   macro avg     0.9643    0.8747    0.9138      2226
+weighted avg     0.9771    0.9775    0.9763      2226
 
-Training binary model: SPAM vs NOT_SPAM
-[SPAM] best threshold = 0.52
+[SPAM] threshold = 0.87
               precision    recall  f1-score   support
 
-           0     0.9982    0.9991    0.9986      1086
-           1     0.9804    0.9615    0.9709        52
+           0     0.9871    0.9943    0.9907      1922
+           1     0.9621    0.9178    0.9394       304
 
-    accuracy                         0.9974      1138
-   macro avg     0.9893    0.9803    0.9847      1138
-weighted avg     0.9973    0.9974    0.9974      1138
-
-```
-
----
-## Transformer（多類）
-
-```text
-=== Classification Report ===
-               precision    recall  f1-score   support
-
-      ABUSIVE     0.9706    1.0000    0.9851        33
-       NORMAL     0.9990    0.9990    0.9990      1028
-PROMPT_ATTACK     1.0000    0.9600    0.9796        25
-         SPAM     1.0000    1.0000    1.0000        52
-
-     accuracy                         0.9982      1138
-    macro avg     0.9924    0.9898    0.9909      1138
- weighted avg     0.9983    0.9982    0.9982      1138
+    accuracy                         0.9838      2226
+   macro avg     0.9746    0.9560    0.9650      2226
+weighted avg     0.9837    0.9838    0.9837      2226
 ```
 
 ---
 
-## Transformer（OvR）
+## Transformer 4選1
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9940 | 0.9970 | 0.9955 | 992 |
+| ABUSIVE | 0.9973 | 0.9881 | 0.9927 | 756 |
+| PROMPT_ATTACK | 0.9659 | 0.9770 | 0.9714 | 174 |
+| SPAM | 0.9869 | 0.9934 | 0.9902 | 304 |
+| **macro avg** | 0.9860 | 0.9889 | **0.9874** | 2226 |
+
+準確率 0.9919
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9873 | 0.9873 | 0.9873 | 79 |
+| ABUSIVE | 0.9804 | 1.0000 | 0.9901 | 50 |
+| PROMPT_ATTACK | 0.9750 | 0.9750 | 0.9750 | 40 |
+| SPAM | 1.0000 | 0.9667 | 0.9831 | 30 |
+| **macro avg** | 0.9857 | 0.9823 | **0.9839** | 199 |
+
+準確率 0.9849
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 78 | 1 | 0 | 0 | 0 |
+| ABUSIVE | 0 | 50 | 0 | 0 | 0 |
+| PROMPT_ATTACK | 1 | 0 | 39 | 0 | 0 |
+| SPAM | 0 | 0 | 1 | 29 | 0 |
+
+---
+
+## Transformer OvR（上線模型）
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9920 | 0.9960 | 0.9940 | 992 |
+| ABUSIVE | 0.9973 | 0.9828 | 0.9900 | 756 |
+| PROMPT_ATTACK | 0.9831 | 1.0000 | 0.9915 | 174 |
+| SPAM | 0.9966 | 0.9770 | 0.9867 | 304 |
+| **macro avg** | 0.9922 | 0.9889 | **0.9905** | 2226 |
+
+準確率 0.9892，UNCERTAIN 0.4%
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9487 | 0.9367 | 0.9427 | 79 |
+| ABUSIVE | 1.0000 | 0.8800 | 0.9362 | 50 |
+| PROMPT_ATTACK | 0.9286 | 0.9750 | 0.9512 | 40 |
+| SPAM | 0.9667 | 0.9667 | 0.9667 | 30 |
+| **macro avg** | 0.9610 | 0.9396 | **0.9492** | 199 |
+
+準確率 0.9347，UNCERTAIN 2.5%
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 74 | 0 | 3 | 1 | 1 |
+| ABUSIVE | 4 | 44 | 0 | 0 | 2 |
+| PROMPT_ATTACK | 0 | 0 | 39 | 0 | 1 |
+| SPAM | 0 | 0 | 0 | 29 | 1 |
+
+### 各二元分類器（test）
 
 ```text
-Training binary model: NORMAL vs NOT_NORMAL
-[NORMAL] threshold(from val) = 0.3
+[NORMAL] threshold = 0.23
               precision    recall  f1-score   support
 
-           0     1.0000    1.0000    1.0000       110
-           1     1.0000    1.0000    1.0000      1028
+           0     0.9975    0.9878    0.9927      1234
+           1     0.9851    0.9970    0.9910       992
 
-    accuracy                         1.0000      1138
-   macro avg     1.0000    1.0000    1.0000      1138
-weighted avg     1.0000    1.0000    1.0000      1138
+    accuracy                         0.9919      2226
+   macro avg     0.9913    0.9924    0.9918      2226
+weighted avg     0.9920    0.9919    0.9919      2226
 
-
-Training binary model: ABUSIVE vs NOT_ABUSIVE
-[ABUSIVE] threshold(from val) = 0.3
+[ABUSIVE] threshold = 0.61
               precision    recall  f1-score   support
 
-           0     1.0000    0.9991    0.9995      1105
-           1     0.9706    1.0000    0.9851        33
+           0     0.9919    0.9973    0.9946      1470
+           1     0.9947    0.9841    0.9894       756
 
-    accuracy                         0.9991      1138
-   macro avg     0.9853    0.9995    0.9923      1138
-weighted avg     0.9991    0.9991    0.9991      1138
+    accuracy                         0.9928      2226
+   macro avg     0.9933    0.9907    0.9920      2226
+weighted avg     0.9928    0.9928    0.9928      2226
 
-Training binary model: PROMPT_ATTACK vs NOT_PROMPT_ATTACK
-[PROMPT_ATTACK] threshold(from val) = 0.3
+[PROMPT_ATTACK] threshold = 0.41
               precision    recall  f1-score   support
 
-           0     0.9991    1.0000    0.9996      1113
-           1     1.0000    0.9600    0.9796        25
+           0     1.0000    0.9946    0.9973      2052
+           1     0.9405    1.0000    0.9694       174
 
-    accuracy                         0.9991      1138
-   macro avg     0.9996    0.9800    0.9896      1138
-weighted avg     0.9991    0.9991    0.9991      1138
+    accuracy                         0.9951      2226
+   macro avg     0.9703    0.9973    0.9833      2226
+weighted avg     0.9954    0.9951    0.9951      2226
 
-Training binary model: SPAM vs NOT_SPAM
-[SPAM] threshold(from val) = 0.3
+[SPAM] threshold = 0.95
               precision    recall  f1-score   support
 
-           0     1.0000    1.0000    1.0000      1086
-           1     1.0000    1.0000    1.0000        52
+           0     0.9964    0.9974    0.9969      1922
+           1     0.9834    0.9770    0.9802       304
 
-    accuracy                         1.0000      1138
-   macro avg     1.0000    1.0000    1.0000      1138
-weighted avg     1.0000    1.0000    1.0000      1138
+    accuracy                         0.9946      2226
+   macro avg     0.9899    0.9872    0.9885      2226
+weighted avg     0.9946    0.9946    0.9946      2226
 ```
+
+---
+
+## 上線流程（規則 → Transformer OvR → 語意比對）
+
+### test（2,226 筆）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9920 | 0.9970 | 0.9945 | 992 |
+| ABUSIVE | 0.9973 | 0.9868 | 0.9920 | 756 |
+| PROMPT_ATTACK | 0.9831 | 1.0000 | 0.9915 | 174 |
+| SPAM | 0.9967 | 0.9868 | 0.9917 | 304 |
+| **macro avg** | 0.9923 | 0.9926 | **0.9924** | 2226 |
+
+準確率 0.9924，UNCERTAIN 0.1%
+
+### hard_eval（199 句）
+
+| 類別 | precision | recall | F1 | 筆數 |
+|---|---|---|---|---|
+| NORMAL | 0.9494 | 0.9494 | 0.9494 | 79 |
+| ABUSIVE | 1.0000 | 0.9200 | 0.9583 | 50 |
+| PROMPT_ATTACK | 0.9286 | 0.9750 | 0.9512 | 40 |
+| SPAM | 0.9667 | 0.9667 | 0.9667 | 30 |
+| **macro avg** | 0.9612 | 0.9528 | **0.9564** | 199 |
+
+準確率 0.9497，UNCERTAIN 1.0%
+
+| 真實 \ 預測 | NORMAL | ABUSIVE | PROMPT_ATTACK | SPAM | UNCERTAIN |
+|---|---|---|---|---|---|
+| NORMAL | 75 | 0 | 3 | 1 | 0 |
+| ABUSIVE | 4 | 46 | 0 | 0 | 0 |
+| PROMPT_ATTACK | 0 | 0 | 39 | 0 | 1 |
+| SPAM | 0 | 0 | 0 | 29 | 1 |
+
+test 各階段判定筆數：ML 2171、RULE 46、SEMANTIC 6、UNCERTAIN 3
+
+hard_eval 各階段判定筆數：ML 184、RULE 10、SEMANTIC 3、UNCERTAIN 2
 
 ---
 
@@ -251,7 +462,7 @@ JailBreakV_28K.csv ──→ extracted_prompt_attack.csv ─step04 去重→ ded
 - 歷史檔名對照：`full_data_set_fillted.csv`（filtered 錯字）= 現 `train_full_dataset.csv`；`FILLTTER/` = 現 `data_pipeline/`
 - 合併與翻譯步驟原為手動/遺失腳本，step06/07 為事後補寫使管線可完整重現
 - 已知資料特性：去重後仍有 592 筆 label 為小寫 `spam`（其餘為大寫 `SPAM`），訓練/評估時注意
-- 完整實驗結果與選型理由見本檔上方各方法 Classification Report
+- 完整實驗結果見本檔開頭的總覽與各方法報告
 
 ---
 
@@ -318,4 +529,4 @@ Windows PowerShell 5.1 下，python 的警告會顯示成紅字 `NativeCommandEr
 - 離題閒聊、笑話依負責人決定維持 SPAM（拒答）
 - PROMPT_ATTACK 只剩 745 筆，且翻譯來源有同一越獄模板的多個翻譯變體 → 建議再補中文客服情境的注入樣本
 - 標籤定義（2026-11-26 確認）：ABUSIVE = 使用者「有情緒」（不滿、焦急、失望、憤怒，有無髒話皆算），策略是先安撫再回答；ML_data 中「客服裝死不理人！準備接客訴」這類激動抱怨標 ABUSIVE 是正確的。人工種子已依此定義標註
-- v2 尚未重新訓練；上線模型仍是舊資料訓練的版本
+- v2 已於 2026-11-26 重訓四次，上線模型是第四批樣本的版本，成績見本檔開頭
