@@ -53,3 +53,25 @@ def test_hard_eval_not_in_training_data():
     df = C.load_dataset(verbose=False)
     assert X_hard is not None
     assert not ({C.norm_key(t) for t in X_hard} & set(df["key"]))
+
+
+def test_blind_eval_not_in_training_data_or_hard_eval():
+    sets = C.load_eval_sets()
+    assert set(sets) == {"hard_eval", "blind_eval"}
+    X_blind, y_blind = sets["blind_eval"]
+    blind_keys = {C.norm_key(t) for t in X_blind}
+    assert len(blind_keys) == len(X_blind) == 200
+    assert set(y_blind) == set(C.LABELS)
+    df = C.load_dataset(verbose=False)
+    assert not (blind_keys & set(df["key"]))
+    assert not (blind_keys & {C.norm_key(t) for t in sets["hard_eval"][0]})
+
+
+def test_blind_eval_csv_matches_source():
+    """blind_eval.csv 由 step09 從 curated_blind_eval.py 產生；改了來源要重跑 step09。"""
+    import sys
+    sys.path.insert(0, str(C.ROOT / "data_pipeline"))
+    import curated_blind_eval
+
+    X_blind, y_blind = C.load_eval_sets()["blind_eval"]
+    assert list(zip(X_blind, y_blind)) == [(t, lb) for t, lb in curated_blind_eval.BLIND_EVAL]

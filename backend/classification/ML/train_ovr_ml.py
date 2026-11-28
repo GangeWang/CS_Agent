@@ -36,12 +36,13 @@ def build_binary_pipeline() -> Pipeline:
 def main() -> None:
     df = C.load_dataset()
     s = C.split_dataset(df)
-    X_hard, y_hard = C.load_hard_eval()
+    evals = C.load_eval_sets()  # hard_eval + blind_eval
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     thresholds: Dict[str, float] = {}
     binary_reports: Dict[str, str] = {}
-    test_probs, hard_probs = [], []
+    test_probs = []
+    eval_probs: Dict[str, list] = {name: [] for name in evals}
 
     for lb in C.LABELS:
         print("\n" + "=" * 72)
@@ -58,8 +59,8 @@ def main() -> None:
         print(f"[{lb}] threshold(from val) = {t}")
         print(rep)
         test_probs.append(p_test)
-        if X_hard is not None:
-            hard_probs.append(clf.predict_proba(X_hard)[:, 1])
+        for name, (X_e, _) in evals.items():
+            eval_probs[name].append(clf.predict_proba(X_e)[:, 1])
 
         path = OUT_DIR / f"{lb.lower()}_bin.joblib"
         joblib.dump(clf, path)
@@ -72,10 +73,10 @@ def main() -> None:
         "test": C.evaluate_split(s.X_test, s.y_test, C.ovr_decide(np.column_stack(test_probs), thresholds),
                                  f"{METHOD} / test (combined decision)"),
     }
-    if X_hard is not None:
-        results["hard_eval"] = C.evaluate_split(
-            X_hard, y_hard, C.ovr_decide(np.column_stack(hard_probs), thresholds),
-            f"{METHOD} / hard_eval (combined decision)")
+    for name, (X_e, y_e) in evals.items():
+        results[name] = C.evaluate_split(
+            X_e, y_e, C.ovr_decide(np.column_stack(eval_probs[name]), thresholds),
+            f"{METHOD} / {name} (combined decision)")
 
     C.write_ovr_config(OUT_DIR, thresholds, {"model_dir": "ML/backend_ml_ovr_models",
                                              "note": "OvR binary models; thresholds selected on VAL."})

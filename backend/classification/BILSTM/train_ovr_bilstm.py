@@ -45,7 +45,7 @@ def main() -> None:
 
     df = C.load_dataset()
     s = C.split_dataset(df)
-    X_hard, y_hard = C.load_hard_eval()
+    evals = C.load_eval_sets()  # hard_eval + blind_eval
 
     vocab = B.build_vocab(s.X_train, MAX_VOCAB_SIZE)
     print(f"Vocab size: {len(vocab)}")
@@ -57,7 +57,8 @@ def main() -> None:
 
     thresholds: Dict[str, float] = {}
     binary_reports: Dict[str, str] = {}
-    test_probs, hard_probs = [], []
+    test_probs = []
+    eval_probs: Dict[str, list] = {name: [] for name in evals}
 
     for lb in C.LABELS:
         print("\n" + "=" * 72)
@@ -80,8 +81,8 @@ def main() -> None:
         print(f"[{lb}] threshold(from val) = {t}")
         print(rep)
         test_probs.append(p_test)
-        if X_hard is not None:
-            hard_probs.append(B.predict_proba(model, loader(X_hard, np.zeros(len(X_hard), dtype=int)), device)[:, 1])
+        for name, (X_e, _) in evals.items():
+            eval_probs[name].append(B.predict_proba(model, loader(X_e, np.zeros(len(X_e), dtype=int)), device)[:, 1])
         print(f"saved => {ckpt}")
 
     results = {
@@ -91,10 +92,10 @@ def main() -> None:
         "test": C.evaluate_split(s.X_test, s.y_test, C.ovr_decide(np.column_stack(test_probs), thresholds),
                                  f"{METHOD} / test (combined decision)"),
     }
-    if X_hard is not None:
-        results["hard_eval"] = C.evaluate_split(
-            X_hard, y_hard, C.ovr_decide(np.column_stack(hard_probs), thresholds),
-            f"{METHOD} / hard_eval (combined decision)")
+    for name, (X_e, y_e) in evals.items():
+        results[name] = C.evaluate_split(
+            X_e, y_e, C.ovr_decide(np.column_stack(eval_probs[name]), thresholds),
+            f"{METHOD} / {name} (combined decision)")
 
     C.write_ovr_config(OUT_DIR, thresholds, {"max_len": MAX_LEN, "model_dir": "BILSTM/backend_ml_ovr_bilstm_models",
                                              "note": "OvR BiLSTM (packed); thresholds selected on VAL."})

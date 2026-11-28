@@ -38,9 +38,8 @@ def main() -> None:
         "method": METHOD,
         "test": C.evaluate_split(s.X_test, s.y_test, clf.predict(s.X_test), f"{METHOD} / test"),
     }
-    X_hard, y_hard = C.load_hard_eval()
-    if X_hard is not None:
-        results["hard_eval"] = C.evaluate_split(X_hard, y_hard, clf.predict(X_hard), f"{METHOD} / hard_eval")
+    for name, (X_e, y_e) in C.load_eval_sets().items():  # hard_eval + blind_eval
+        results[name] = C.evaluate_split(X_e, y_e, clf.predict(X_e), f"{METHOD} / {name}")
 
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(clf, MODEL_PATH)
